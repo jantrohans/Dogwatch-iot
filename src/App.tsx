@@ -30,6 +30,7 @@ import {
   CartesianGrid
 } from 'recharts';
 import { supabase } from './supabase';
+import bcrypt from 'bcryptjs';
 
 // ---- TYPE DEFINITIONS ----
 type UserRole = 'admin' | 'owner';
@@ -125,6 +126,7 @@ function App() {
   // Auth Screen toggles & form state
   const [authRole, setAuthRole] = useState<UserRole>('admin');
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authStep, setAuthStep] = useState<'select' | 'form'>('select');
   const [authUsername, setAuthUsername] = useState('');
   const [authFullName, setAuthFullName] = useState('');
   const [authPassword, setAuthPassword] = useState('');
@@ -479,7 +481,11 @@ function App() {
       const existing = registeredUsers.find(u => u.username.toLowerCase() === cleanUsername);
 
       if (existing) {
-        if (existing.password && existing.password !== authPassword.trim()) {
+        const isMatch = existing.password && existing.password.startsWith('$2')
+          ? bcrypt.compareSync(authPassword.trim(), existing.password)
+          : existing.password === authPassword.trim();
+
+        if (!isMatch) {
           setAuthError('Password salah! Silakan periksa kembali password Anda.');
           return;
         }
@@ -503,7 +509,7 @@ function App() {
         username: cleanUsername,
         fullName: authFullName.trim() || (authRole === 'admin' ? `Admin (${cleanUsername})` : `Pemilik (${cleanUsername})`),
         role: authRole,
-        password: authPassword.trim()
+        password: bcrypt.hashSync(authPassword.trim(), 10)
       };
       const { error } = await supabase.from('users').insert(newUser);
       if (!error) {
@@ -542,7 +548,7 @@ function App() {
       username: cleanUser,
       fullName: newOwnerFullName.trim() || `${cleanUser} (Pemilik)`,
       role: 'owner',
-      password: newOwnerPassword.trim()
+      password: bcrypt.hashSync(newOwnerPassword.trim(), 10)
     };
 
     const { error } = await supabase.from('users').insert(newUser);
@@ -776,95 +782,109 @@ function App() {
           <h2 className="auth-title">Portal Akses Dashboard</h2>
           <p className="auth-subtitle">Pilih jenis akun untuk masuk ke sistem monitoring Smartwatch Anjing</p>
 
-          {/* Role Selection Tabs */}
-          <div className="role-selector">
-            <button 
-              type="button"
-              className={`role-btn ${authRole === 'admin' ? 'active-admin' : ''}`}
-              onClick={() => setAuthRole('admin')}
-            >
-              <Building2 size={16} />
-              <span>Dog Hotel (Admin)</span>
-            </button>
-            <button 
-              type="button"
-              className={`role-btn ${authRole === 'owner' ? 'active-owner' : ''}`}
-              onClick={() => setAuthRole('owner')}
-            >
-              <UserCheck size={16} />
-              <span>Pemilik Anjing (User)</span>
-            </button>
-          </div>
-
-          <form onSubmit={handleAuthSubmit}>
-            <div className="form-group">
-              <label className="form-label">Username</label>
-              <input 
-                type="text" 
-                className="form-input" 
-                value={authUsername}
-                onChange={(e) => setAuthUsername(e.target.value)}
-                placeholder={authRole === 'admin' ? 'e.g. admin' : 'e.g. willy atau budi'}
-                required
-              />
+          {authStep === 'select' ? (
+            <div className="role-selection-cards" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '2rem' }}>
+              <button 
+                className="btn-primary"
+                style={{ padding: '1rem', fontSize: '1.1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', backgroundColor: 'var(--color-primary)' }}
+                onClick={() => { setAuthRole('admin'); setAuthStep('form'); setAuthMode('login'); setAuthError(''); }}
+              >
+                <Building2 size={24} /> Masuk sebagai Dog Hotel (Admin)
+              </button>
+              <button 
+                className="btn-secondary"
+                style={{ padding: '1rem', fontSize: '1.1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', backgroundColor: 'var(--card-bg)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+                onClick={() => { setAuthRole('owner'); setAuthStep('form'); setAuthMode('login'); setAuthError(''); }}
+              >
+                <UserCheck size={24} /> Masuk sebagai Pemilik Anjing (User)
+              </button>
             </div>
+          ) : (
+            <>
+              <button 
+                type="button" 
+                onClick={() => setAuthStep('select')}
+                style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.25rem', marginBottom: '1.5rem', fontSize: '0.95rem', padding: 0 }}
+              >
+                ← Kembali
+              </button>
 
-            <div className="form-group">
-              <label className="form-label">Password</label>
-              <input 
-                type="password" 
-                className="form-input" 
-                value={authPassword}
-                onChange={(e) => setAuthPassword(e.target.value)}
-                placeholder="Masukkan password akun..."
-                required
-              />
-            </div>
-            
-            {authMode === 'register' && (
-              <div className="form-group">
-                <label className="form-label">Nama Lengkap / Nama Hotel</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  value={authFullName}
-                  onChange={(e) => setAuthFullName(e.target.value)}
-                  placeholder={authRole === 'admin' ? 'e.g. Dog Hotel Petcare Grand' : 'e.g. Willy Suraya'}
-                />
+              <form onSubmit={handleAuthSubmit}>
+                <div style={{ textAlign: 'center', marginBottom: '1.5rem', padding: '0.75rem', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
+                  <span style={{ fontWeight: 600, color: authRole === 'admin' ? 'var(--color-primary)' : '#10b981' }}>
+                    {authRole === 'admin' ? 'Mode: Administrator Hotel' : 'Mode: Pemilik Anjing'}
+                  </span>
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Username</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    value={authUsername}
+                    onChange={(e) => setAuthUsername(e.target.value)}
+                    placeholder={authRole === 'admin' ? 'e.g. admin' : 'e.g. willy atau budi'}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Password</label>
+                  <input 
+                    type="password" 
+                    className="form-input" 
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    placeholder="Masukkan password akun..."
+                    required
+                  />
+                </div>
+                
+                {authMode === 'register' && (
+                  <div className="form-group">
+                    <label className="form-label">Nama Lengkap / Nama Hotel</label>
+                    <input 
+                      type="text" 
+                      className="form-input" 
+                      value={authFullName}
+                      onChange={(e) => setAuthFullName(e.target.value)}
+                      placeholder={authRole === 'admin' ? 'e.g. Dog Hotel Petcare Grand' : 'e.g. Willy Suraya'}
+                    />
+                  </div>
+                )}
+
+                {authError && (
+                  <div style={{ color: 'var(--color-critical)', fontSize: '0.85rem', marginBottom: '1rem', textAlign: 'center' }}>
+                    {authError}
+                  </div>
+                )}
+
+                <button type="submit" className="btn-primary" style={{ marginTop: '0.5rem', backgroundColor: authRole === 'admin' ? 'var(--color-primary)' : '#10b981' }}>
+                  {authMode === 'login' 
+                    ? (authRole === 'admin' ? 'Masuk sebagai Dog Hotel Admin' : 'Masuk sebagai Pemilik Anjing')
+                    : (authRole === 'admin' ? 'Daftar Akun Dog Hotel Admin' : 'Daftar Akun Pemilik Anjing')}
+                </button>
+              </form>
+
+              <div className="auth-switch">
+                {authMode === 'login' ? (
+                  <>
+                    Belum memiliki akun?{' '}
+                    <span className="auth-link" onClick={() => { setAuthMode('register'); setAuthError(''); }}>
+                      Daftar Sekarang
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    Sudah memiliki akun?{' '}
+                    <span className="auth-link" onClick={() => { setAuthMode('login'); setAuthError(''); }}>
+                      Sign In
+                    </span>
+                  </>
+                )}
               </div>
-            )}
-
-            {authError && (
-              <div style={{ color: 'var(--color-critical)', fontSize: '0.85rem', marginBottom: '1rem', textAlign: 'center' }}>
-                {authError}
-              </div>
-            )}
-
-            <button type="submit" className="btn-primary" style={{ marginTop: '0.5rem' }}>
-              {authMode === 'login' 
-                ? (authRole === 'admin' ? 'Masuk sebagai Dog Hotel Admin' : 'Masuk sebagai Pemilik Anjing')
-                : (authRole === 'admin' ? 'Daftar Akun Dog Hotel Admin' : 'Daftar Akun Pemilik Anjing')}
-            </button>
-          </form>
-
-          <div className="auth-switch">
-            {authMode === 'login' ? (
-              <>
-                Belum memiliki akun?{' '}
-                <span className="auth-link" onClick={() => setAuthMode('register')}>
-                  Daftar Sekarang
-                </span>
-              </>
-            ) : (
-              <>
-                Sudah memiliki akun?{' '}
-                <span className="auth-link" onClick={() => setAuthMode('login')}>
-                  Sign In
-                </span>
-              </>
-            )}
-          </div>
-
+            </>
+          )}
         </div>
       </div>
     );
