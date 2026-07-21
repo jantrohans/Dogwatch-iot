@@ -1,0 +1,1872 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Dog as DogIcon, 
+  Activity, 
+  Heart, 
+  Thermometer, 
+  Plus, 
+  Settings, 
+  LogOut, 
+  AlertTriangle, 
+  Check, 
+  X, 
+  Zap, 
+  Trash2, 
+  ShieldAlert,
+  Moon,
+  Info,
+  Building2,
+  Edit3,
+  UserCheck
+} from 'lucide-react';
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid
+} from 'recharts';
+import type { User as UserType, Dog, TelemetryData, Alert, PostureType, ActivityStateType, UserRole } from './types';
+import './App.css';
+
+// Pre-configured default users for demo
+const DEFAULT_USERS: UserType[] = [
+  {
+    id: 'user-admin',
+    username: 'admin',
+    fullName: 'Dog Hotel Grand (Admin)',
+    role: 'admin'
+  },
+  {
+    id: 'user-willy',
+    username: 'willy',
+    fullName: 'Willy (Pemilik)',
+    role: 'owner'
+  },
+  {
+    id: 'user-budi',
+    username: 'budi',
+    fullName: 'Budi (Pemilik)',
+    role: 'owner'
+  }
+];
+
+// Pre-configured initial dogs assigned to specific owners
+const DEFAULT_DOGS: Dog[] = [
+  {
+    id: 'dog-buddy',
+    name: 'Buddy',
+    breed: 'Golden Retriever',
+    age: 3,
+    weight: 32,
+    ownerId: 'user-willy',
+    ownerName: 'willy',
+    settings: {
+      minHeartRate: 70,
+      maxHeartRate: 120,
+      minSpO2: 94,
+      minTemp: 37.8,
+      maxTemp: 39.4
+    }
+  },
+  {
+    id: 'dog-luna',
+    name: 'Luna',
+    breed: 'Chihuahua',
+    age: 2,
+    weight: 3.5,
+    ownerId: 'user-budi',
+    ownerName: 'budi',
+    settings: {
+      minHeartRate: 100,
+      maxHeartRate: 150,
+      minSpO2: 95,
+      minTemp: 38.0,
+      maxTemp: 39.6
+    }
+  }
+];
+
+// Helper to generate mock historical telemetry data
+const generateMockHistory = (dogId: string, count: number): TelemetryData[] => {
+  const history: TelemetryData[] = [];
+  const baseTime = Date.now() - count * 5000;
+  const isSmallDog = dogId.includes('luna');
+  const baseHR = isSmallDog ? 110 : 80;
+  
+  for (let i = 0; i < count; i++) {
+    const time = new Date(baseTime + i * 5000).toISOString();
+    const isSleeping = i < count / 2;
+    
+    history.push({
+      dogId,
+      timestamp: time,
+      mpu6050: {
+        accelX: isSleeping ? 0.02 : 0.45 + Math.random() * 0.2,
+        accelY: isSleeping ? -0.01 : -0.21 + Math.random() * 0.2,
+        accelZ: isSleeping ? 0.98 : 0.85 + Math.random() * 0.2,
+        gyroX: isSleeping ? 0.1 : 5.4 + Math.random() * 5,
+        gyroY: isSleeping ? -0.2 : -2.1 + Math.random() * 4,
+        gyroZ: isSleeping ? 0.15 : 1.2 + Math.random() * 3,
+        steps: isSleeping ? 420 : 420 + i * 2,
+        activeMinutes: isSleeping ? 12 : 12 + Math.floor(i / 10),
+        posture: isSleeping ? 'lying-side' : 'standing',
+        activityState: isSleeping ? 'resting' : 'walking'
+      },
+      max30102: {
+        heartRate: baseHR + (isSleeping ? -5 : 10) + Math.floor(Math.random() * 6),
+        spo2: 97 + Math.floor(Math.random() * 3),
+        hrv: 45 + (isSleeping ? 15 : -5) + Math.floor(Math.random() * 10)
+      },
+      mlx90614: {
+        bodyTemp: 38.4 + (isSleeping ? -0.2 : 0.3) + parseFloat((Math.random() * 0.3).toFixed(2)),
+        ambientTemp: 24.5 + parseFloat((Math.random() * 0.8).toFixed(2))
+      }
+    });
+  }
+  return history;
+};
+
+function App() {
+  // --- USERS & AUTH STATE ---
+  const [registeredUsers, setRegisteredUsers] = useState<UserType[]>(() => {
+    const stored = localStorage.getItem('dogwatch_users');
+    return stored ? JSON.parse(stored) : DEFAULT_USERS;
+  });
+
+  const [currentUser, setCurrentUser] = useState<UserType | null>(() => {
+    const stored = localStorage.getItem('dogwatch_user');
+    return stored ? JSON.parse(stored) : DEFAULT_USERS[0]; // Admin default
+  });
+
+  // --- DOGS STATE ---
+  const [dogs, setDogs] = useState<Dog[]>(() => {
+    const stored = localStorage.getItem('dogwatch_dogs');
+    return stored ? JSON.parse(stored) : DEFAULT_DOGS;
+  });
+
+  const [selectedDogId, setSelectedDogId] = useState<string>('dog-buddy');
+
+  const [telemetryHistory, setTelemetryHistory] = useState<Record<string, TelemetryData[]>>(() => {
+    const initialHist: Record<string, TelemetryData[]> = {};
+    const storedDogs = localStorage.getItem('dogwatch_dogs');
+    const dogList: Dog[] = storedDogs ? JSON.parse(storedDogs) : DEFAULT_DOGS;
+    dogList.forEach(dog => {
+      initialHist[dog.id] = generateMockHistory(dog.id, 20);
+    });
+    return initialHist;
+  });
+
+  const [alerts, setAlerts] = useState<Alert[]>(() => {
+    localStorage.removeItem('dogwatch_alerts');
+    return [];
+  });
+
+  // Auth Screen toggles & form state
+  const [authRole, setAuthRole] = useState<UserRole>('admin');
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authUsername, setAuthUsername] = useState('');
+  const [authFullName, setAuthFullName] = useState('');
+  const [authError, setAuthError] = useState('');
+
+  // Modals state
+  const [isAddDogOpen, setIsAddDogOpen] = useState(false);
+  const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // Add Dog Form inputs (Admin)
+  const [newDogName, setNewDogName] = useState('');
+  const [newDogBreed, setNewDogBreed] = useState('');
+  const [newDogAge, setNewDogAge] = useState('');
+  const [newDogWeight, setNewDogWeight] = useState('');
+  const [newDogOwnerUsername, setNewDogOwnerUsername] = useState('willy');
+
+  // Edit Dog Profile Form inputs (Admin)
+  const [editingDogId, setEditingDogId] = useState('');
+  const [editDogName, setEditDogName] = useState('');
+  const [editDogBreed, setEditDogBreed] = useState('');
+  const [editDogAge, setEditDogAge] = useState('');
+  const [editDogWeight, setEditDogWeight] = useState('');
+  const [editDogOwnerUsername, setEditDogOwnerUsername] = useState('');
+
+  // Settings Edit inputs (Thresholds)
+  const [editMinHR, setEditMinHR] = useState('');
+  const [editMaxHR, setEditMaxHR] = useState('');
+  const [editMinSpO2, setEditMinSpO2] = useState('');
+  const [editMinTemp, setEditMinTemp] = useState('');
+  const [editMaxTemp, setEditMaxTemp] = useState('');
+
+  // General App settings
+  const [tempUnit, setTempUnit] = useState<'C' | 'F'>('C');
+  const [activeTab, setActiveTab] = useState<'realtime' | 'mpu6050' | 'max30102' | 'mlx90614'>('realtime');
+
+  // --- HARDWARE SIMULATOR STATE ---
+  const [simPreset, setSimPreset] = useState<'healthy' | 'sleeping' | 'running' | 'anxious' | 'fever' | 'fall'>('healthy');
+  const [simHeartRate, setSimHeartRate] = useState(85);
+  const [simSpO2, setSimSpO2] = useState(98);
+  const [simBodyTemp, setSimBodyTemp] = useState(38.5);
+  const [simAmbientTemp, setSimAmbientTemp] = useState(25.0);
+  const [simPosture, setSimPosture] = useState<PostureType>('standing');
+  const [simActivity, setSimActivity] = useState<ActivityStateType>('resting');
+  const [simSteps, setSimSteps] = useState(1200);
+  const [simActiveMinutes, setSimActiveMinutes] = useState(35);
+  
+  const [simAccelX, setSimAccelX] = useState(0.12);
+  const [simAccelY, setSimAccelY] = useState(-0.05);
+  const [simAccelZ, setSimAccelZ] = useState(0.97);
+  const [simGyroX, setSimGyroX] = useState(1.2);
+  const [simGyroY, setSimGyroY] = useState(-0.8);
+  const [simGyroZ, setSimGyroZ] = useState(0.4);
+
+  const simIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // --- ROLE BASED DOG FILTERING ---
+  const isAdmin = currentUser?.role === 'admin';
+
+  // Admin sees ALL dogs; Owner ONLY sees dogs assigned to them by Admin
+  const userDogs = dogs.filter(d => {
+    if (isAdmin) return true;
+    return (
+      d.ownerId === currentUser?.id ||
+      (d.ownerName && d.ownerName.toLowerCase() === currentUser?.username.toLowerCase())
+    );
+  });
+
+  // Current active selected dog object
+  const activeDog = userDogs.find(d => d.id === selectedDogId) || userDogs[0];
+
+  // --- PERSISTENCE EFFECT ---
+  useEffect(() => {
+    localStorage.setItem('dogwatch_dogs', JSON.stringify(dogs));
+  }, [dogs]);
+
+  useEffect(() => {
+    localStorage.setItem('dogwatch_users', JSON.stringify(registeredUsers));
+  }, [registeredUsers]);
+
+  useEffect(() => {
+    localStorage.setItem('dogwatch_alerts', JSON.stringify(alerts));
+  }, [alerts]);
+
+  // Keep selectedDogId valid when switching users or editing dogs
+  useEffect(() => {
+    if (userDogs.length > 0) {
+      if (!userDogs.some(d => d.id === selectedDogId)) {
+        setSelectedDogId(userDogs[0].id);
+      }
+    } else {
+      setSelectedDogId('');
+    }
+  }, [currentUser, dogs]);
+
+  // Sync edit settings fields when opening settings modal or changing active dog
+  useEffect(() => {
+    if (activeDog) {
+      setEditMinHR(activeDog.settings.minHeartRate.toString());
+      setEditMaxHR(activeDog.settings.maxHeartRate.toString());
+      setEditMinSpO2(activeDog.settings.minSpO2.toString());
+      setEditMinTemp(activeDog.settings.minTemp.toString());
+      setEditMaxTemp(activeDog.settings.maxTemp.toString());
+    }
+  }, [activeDog, isSettingsOpen]);
+
+  // Adjust simulator values when selected dog changes or preset changes
+  useEffect(() => {
+    if (!activeDog) return;
+    
+    const isSmall = activeDog.name.toLowerCase() === 'luna' || activeDog.breed.toLowerCase().includes('chihuahua');
+    
+    switch (simPreset) {
+      case 'healthy':
+        setSimHeartRate(isSmall ? 115 : 85);
+        setSimSpO2(98);
+        setSimBodyTemp(38.6);
+        setSimPosture('standing');
+        setSimActivity('resting');
+        setSimAccelX(0.08); setSimAccelY(-0.04); setSimAccelZ(0.98);
+        setSimGyroX(0.5); setSimGyroY(-0.3); setSimGyroZ(0.2);
+        break;
+      case 'sleeping':
+        setSimHeartRate(isSmall ? 98 : 72);
+        setSimSpO2(99);
+        setSimBodyTemp(38.2);
+        setSimPosture('lying-side');
+        setSimActivity('resting');
+        setSimAccelX(0.01); setSimAccelY(-0.01); setSimAccelZ(0.99);
+        setSimGyroX(0.1); setSimGyroY(-0.1); setSimGyroZ(0.05);
+        break;
+      case 'running':
+        setSimHeartRate(isSmall ? 155 : 125);
+        setSimSpO2(96);
+        setSimBodyTemp(39.1);
+        setSimPosture('running');
+        setSimActivity('running');
+        setSimAccelX(0.85); setSimAccelY(-0.55); setSimAccelZ(1.35);
+        setSimGyroX(32.4); setSimGyroY(-18.6); setSimGyroZ(24.1);
+        break;
+      case 'anxious':
+        setSimHeartRate(isSmall ? 165 : 138);
+        setSimSpO2(97);
+        setSimBodyTemp(38.9);
+        setSimPosture('scratching');
+        setSimActivity('scratching');
+        setSimAccelX(0.35); setSimAccelY(-0.25); setSimAccelZ(1.15);
+        setSimGyroX(15.2); setSimGyroY(-12.4); setSimGyroZ(10.1);
+        break;
+      case 'fever':
+        setSimHeartRate(isSmall ? 130 : 98);
+        setSimSpO2(95);
+        setSimBodyTemp(40.2);
+        setSimPosture('sitting');
+        setSimActivity('resting');
+        setSimAccelX(0.05); setSimAccelY(-0.03); setSimAccelZ(0.98);
+        setSimGyroX(0.2); setSimGyroY(-0.1); setSimGyroZ(0.1);
+        break;
+      case 'fall':
+        setSimHeartRate(isSmall ? 145 : 118);
+        setSimSpO2(96);
+        setSimBodyTemp(38.7);
+        setSimPosture('lying-side');
+        setSimActivity('resting');
+        setSimAccelX(3.8); setSimAccelY(2.9); setSimAccelZ(0.2);
+        setSimGyroX(120.5); setSimGyroY(95.4); setSimGyroZ(150.2);
+        break;
+    }
+  }, [simPreset, selectedDogId, activeDog]);
+
+  // --- SIMULATOR TELEMETRY HEARTBEAT ---
+  useEffect(() => {
+    if (!activeDog) return;
+
+    simIntervalRef.current = setInterval(() => {
+      setSimHeartRate(prev => {
+        const drift = (Math.random() - 0.5) * 4;
+        const newVal = Math.round(prev + drift);
+        return Math.max(40, Math.min(220, newVal));
+      });
+
+      setSimSpO2(prev => {
+        const drift = Math.random() > 0.85 ? (Math.random() > 0.5 ? 1 : -1) : 0;
+        return Math.max(80, Math.min(100, prev + drift));
+      });
+
+      setSimBodyTemp(prev => {
+        const drift = (Math.random() - 0.5) * 0.08;
+        return parseFloat(Math.max(35.0, Math.min(43.0, prev + drift)).toFixed(2));
+      });
+
+      setSimAmbientTemp(prev => {
+        const drift = (Math.random() - 0.5) * 0.15;
+        return parseFloat(Math.max(10.0, Math.min(45.0, prev + drift)).toFixed(2));
+      });
+
+      setSimAccelX(prev => parseFloat((prev + (Math.random() - 0.5) * 0.05).toFixed(3)));
+      setSimAccelY(prev => parseFloat((prev + (Math.random() - 0.5) * 0.05).toFixed(3)));
+      setSimAccelZ(prev => parseFloat((prev + (Math.random() - 0.5) * 0.05).toFixed(3)));
+      setSimGyroX(prev => parseFloat((prev + (Math.random() - 0.5) * 0.8).toFixed(2)));
+      setSimGyroY(prev => parseFloat((prev + (Math.random() - 0.5) * 0.8).toFixed(2)));
+      setSimGyroZ(prev => parseFloat((prev + (Math.random() - 0.5) * 0.8).toFixed(2)));
+
+      setSimSteps(prev => {
+        if (simActivity === 'running') return prev + Math.floor(Math.random() * 5) + 3;
+        if (simActivity === 'walking') return prev + Math.floor(Math.random() * 3) + 1;
+        return prev;
+      });
+
+      setTelemetryHistory(prevHist => {
+        const dogHist = prevHist[activeDog.id] || [];
+        const timestamp = new Date().toISOString();
+
+        const latestTelemetry: TelemetryData = {
+          dogId: activeDog.id,
+          timestamp,
+          mpu6050: {
+            accelX: parseFloat(simAccelX.toFixed(3)),
+            accelY: parseFloat(simAccelY.toFixed(3)),
+            accelZ: parseFloat(simAccelZ.toFixed(3)),
+            gyroX: parseFloat(simGyroX.toFixed(2)),
+            gyroY: parseFloat(simGyroY.toFixed(2)),
+            gyroZ: parseFloat(simGyroZ.toFixed(2)),
+            steps: simSteps,
+            activeMinutes: simActiveMinutes,
+            posture: simPosture,
+            activityState: simActivity
+          },
+          max30102: {
+            heartRate: simHeartRate,
+            spo2: simSpO2,
+            hrv: simPreset === 'sleeping' ? 58 + Math.floor(Math.random() * 4) : 40 + Math.floor(Math.random() * 8)
+          },
+          mlx90614: {
+            bodyTemp: simBodyTemp,
+            ambientTemp: simAmbientTemp
+          }
+        };
+
+        checkThresholds(latestTelemetry);
+
+        const newHist = [...dogHist, latestTelemetry];
+        if (newHist.length > 30) newHist.shift();
+        
+        return {
+          ...prevHist,
+          [activeDog.id]: newHist
+        };
+      });
+    }, 2000);
+
+    return () => {
+      if (simIntervalRef.current) clearInterval(simIntervalRef.current);
+    };
+  }, [
+    activeDog,
+    simHeartRate, 
+    simSpO2, 
+    simBodyTemp, 
+    simAmbientTemp, 
+    simPosture, 
+    simActivity, 
+    simSteps, 
+    simActiveMinutes,
+    simAccelX, simAccelY, simAccelZ,
+    simGyroX, simGyroY, simGyroZ,
+    simPreset,
+    dogs
+  ]);
+
+  useEffect(() => {
+    const minutesInterval = setInterval(() => {
+      if (simActivity === 'running' || simActivity === 'walking' || simActivity === 'scratching') {
+        setSimActiveMinutes(prev => prev + 1);
+      }
+    }, 60000);
+    return () => clearInterval(minutesInterval);
+  }, [simActivity]);
+
+  // --- THRESHOLD CHECKING LOGIC ---
+  const checkThresholds = (data: TelemetryData) => {
+    if (!activeDog) return;
+    const settings = activeDog.settings;
+    const newAlerts: Omit<Alert, 'id' | 'timestamp' | 'resolved'>[] = [];
+
+    if (data.max30102.heartRate > settings.maxHeartRate) {
+      newAlerts.push({
+        dogId: activeDog.id,
+        dogName: activeDog.name,
+        type: 'heart_rate',
+        severity: data.max30102.heartRate > settings.maxHeartRate + 25 ? 'critical' : 'warning',
+        message: `${activeDog.name}'s Heart Rate is critically high at ${data.max30102.heartRate} BPM (Limit: ${settings.maxHeartRate} BPM)`
+      });
+    } else if (data.max30102.heartRate < settings.minHeartRate) {
+      newAlerts.push({
+        dogId: activeDog.id,
+        dogName: activeDog.name,
+        type: 'heart_rate',
+        severity: data.max30102.heartRate < settings.minHeartRate - 15 ? 'critical' : 'warning',
+        message: `${activeDog.name}'s Heart Rate is low at ${data.max30102.heartRate} BPM (Limit: ${settings.minHeartRate} BPM)`
+      });
+    }
+
+    if (data.max30102.spo2 < settings.minSpO2) {
+      newAlerts.push({
+        dogId: activeDog.id,
+        dogName: activeDog.name,
+        type: 'spo2',
+        severity: data.max30102.spo2 < 90 ? 'critical' : 'warning',
+        message: `${activeDog.name}'s Blood Oxygen level (SpO2) dropped to ${data.max30102.spo2}%! (Normal: >${settings.minSpO2}%)`
+      });
+    }
+
+    if (data.mlx90614.bodyTemp > settings.maxTemp) {
+      newAlerts.push({
+        dogId: activeDog.id,
+        dogName: activeDog.name,
+        type: 'fever',
+        severity: data.mlx90614.bodyTemp > 40.0 ? 'critical' : 'warning',
+        message: `${activeDog.name} has a fever! Body temp is ${data.mlx90614.bodyTemp}°C (${(data.mlx90614.bodyTemp * 1.8 + 32).toFixed(1)}°F)`
+      });
+    } else if (data.mlx90614.bodyTemp < settings.minTemp) {
+      newAlerts.push({
+        dogId: activeDog.id,
+        dogName: activeDog.name,
+        type: 'hypothermia',
+        severity: data.mlx90614.bodyTemp < 37.0 ? 'critical' : 'warning',
+        message: `${activeDog.name} shows signs of hypothermia. Temp is ${data.mlx90614.bodyTemp}°C (${(data.mlx90614.bodyTemp * 1.8 + 32).toFixed(1)}°F)`
+      });
+    }
+
+    if (data.mlx90614.ambientTemp > 32.0 && data.mlx90614.bodyTemp > 39.2 && data.mpu6050.activityState === 'running') {
+      newAlerts.push({
+        dogId: activeDog.id,
+        dogName: activeDog.name,
+        type: 'heatstroke',
+        severity: 'critical',
+        message: `HEATSTROKE DANGER: High ambient temp (${data.mlx90614.ambientTemp}°C) coupled with running activity. Seek shade!`
+      });
+    }
+
+    const accelMagnitude = Math.sqrt(
+      data.mpu6050.accelX * data.mpu6050.accelX +
+      data.mpu6050.accelY * data.mpu6050.accelY +
+      data.mpu6050.accelZ * data.mpu6050.accelZ
+    );
+    if (accelMagnitude > 3.0 && simPreset === 'fall') {
+      newAlerts.push({
+        dogId: activeDog.id,
+        dogName: activeDog.name,
+        type: 'fall',
+        severity: 'critical',
+        message: `CRITICAL ALERT: Sudden high impact (fall/collision) detected for ${activeDog.name}!`
+      });
+    }
+
+    const now = Date.now();
+    const filteredAlerts = newAlerts.filter(newA => {
+      return !alerts.some(existing => 
+        existing.dogId === newA.dogId && 
+        existing.type === newA.type && 
+        !existing.resolved &&
+        (now - new Date(existing.timestamp).getTime()) < 15000
+      );
+    });
+
+    if (filteredAlerts.length > 0) {
+      const timestamp = new Date().toISOString();
+      const resolvedList = filteredAlerts.map((a) => ({
+        ...a,
+        id: crypto.randomUUID(),
+        timestamp,
+        resolved: false
+      }));
+
+      setAlerts(prev => [
+        ...resolvedList,
+        ...prev
+      ].slice(0, 50));
+    }
+  };
+
+  const handleResolveAlert = (alertId: string) => {
+    setAlerts(prev => prev.map(a => a.id === alertId ? { ...a, resolved: true } : a));
+  };
+
+  const handleClearAllAlerts = () => {
+    setAlerts([]);
+  };
+
+  // --- ACTIONS & HANDLERS ---
+
+  // Auth Submit (Login / Register)
+  const handleAuthSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!authUsername.trim()) {
+      setAuthError('Username wajib diisi!');
+      return;
+    }
+
+    const cleanUsername = authUsername.trim().toLowerCase();
+
+    if (authMode === 'login') {
+      const existing = registeredUsers.find(u => u.username.toLowerCase() === cleanUsername);
+
+      if (existing) {
+        setCurrentUser(existing);
+        localStorage.setItem('dogwatch_user', JSON.stringify(existing));
+      } else {
+        // Auto create user with chosen role
+        const userId = `user-${cleanUsername}`;
+        const newUser: UserType = {
+          id: userId,
+          username: cleanUsername,
+          fullName: authFullName.trim() || (authRole === 'admin' ? `Admin (${cleanUsername})` : `Pemilik (${cleanUsername})`),
+          role: authRole
+        };
+        setRegisteredUsers(prev => [...prev, newUser]);
+        setCurrentUser(newUser);
+        localStorage.setItem('dogwatch_user', JSON.stringify(newUser));
+      }
+    } else {
+      // Register new account
+      const existing = registeredUsers.find(u => u.username.toLowerCase() === cleanUsername);
+      if (existing) {
+        setAuthError(`Username "${cleanUsername}" sudah terdaftar. Silakan gunakan tab Sign In.`);
+        return;
+      }
+
+      const userId = `user-${cleanUsername}`;
+      const newUser: UserType = {
+        id: userId,
+        username: cleanUsername,
+        fullName: authFullName.trim() || (authRole === 'admin' ? `Admin (${cleanUsername})` : `Pemilik (${cleanUsername})`),
+        role: authRole
+      };
+      setRegisteredUsers(prev => [...prev, newUser]);
+      setCurrentUser(newUser);
+      localStorage.setItem('dogwatch_user', JSON.stringify(newUser));
+    }
+
+    setAuthError('');
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    localStorage.removeItem('dogwatch_user');
+  };
+
+  // Add Dog Submit (Admin Only)
+  const handleAddDog = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDogName.trim() || !newDogBreed.trim() || !newDogAge || !newDogWeight) return;
+
+    const dogId = `dog-${newDogName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
+    const cleanOwner = newDogOwnerUsername.trim().toLowerCase() || 'willy';
+    let targetOwnerId = `user-${cleanOwner}`;
+
+    const existingOwner = registeredUsers.find(u => u.username.toLowerCase() === cleanOwner);
+    if (existingOwner) {
+      targetOwnerId = existingOwner.id;
+    } else {
+      const newOwner: UserType = {
+        id: targetOwnerId,
+        username: cleanOwner,
+        fullName: `${cleanOwner} (Pemilik)`,
+        role: 'owner'
+      };
+      setRegisteredUsers(prev => [...prev, newOwner]);
+    }
+
+    const newDog: Dog = {
+      id: dogId,
+      name: newDogName.trim(),
+      breed: newDogBreed.trim(),
+      age: parseFloat(newDogAge),
+      weight: parseFloat(newDogWeight),
+      ownerId: targetOwnerId,
+      ownerName: cleanOwner,
+      settings: {
+        minHeartRate: 70,
+        maxHeartRate: 130,
+        minSpO2: 94,
+        minTemp: 37.8,
+        maxTemp: 39.5
+      }
+    };
+
+    const updatedDogs = [...dogs, newDog];
+    setDogs(updatedDogs);
+    setSelectedDogId(dogId);
+    
+    setTelemetryHistory(prev => ({
+      ...prev,
+      [dogId]: generateMockHistory(dogId, 20)
+    }));
+
+    setNewDogName('');
+    setNewDogBreed('');
+    setNewDogAge('');
+    setNewDogWeight('');
+    setNewDogOwnerUsername('willy');
+    setIsAddDogOpen(false);
+  };
+
+  // Open Edit Profile Modal (Admin Only)
+  const handleOpenEditProfile = (dogToEdit: Dog) => {
+    setEditingDogId(dogToEdit.id);
+    setEditDogName(dogToEdit.name);
+    setEditDogBreed(dogToEdit.breed);
+    setEditDogAge(dogToEdit.age.toString());
+    setEditDogWeight(dogToEdit.weight.toString());
+    setEditDogOwnerUsername(dogToEdit.ownerName || dogToEdit.ownerId.replace('user-', ''));
+    setIsEditProfileOpen(true);
+  };
+
+  // Save Edited Dog Profile (Admin Only)
+  const handleSaveEditProfile = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingDogId) return;
+
+    const cleanOwner = editDogOwnerUsername.trim().toLowerCase();
+    let targetOwnerId = `user-${cleanOwner}`;
+
+    const existingOwner = registeredUsers.find(u => u.username.toLowerCase() === cleanOwner);
+    if (existingOwner) {
+      targetOwnerId = existingOwner.id;
+    } else if (cleanOwner) {
+      const newOwner: UserType = {
+        id: targetOwnerId,
+        username: cleanOwner,
+        fullName: `${cleanOwner} (Pemilik)`,
+        role: 'owner'
+      };
+      setRegisteredUsers(prev => [...prev, newOwner]);
+    }
+
+    const updatedDogs = dogs.map(d => {
+      if (d.id === editingDogId) {
+        return {
+          ...d,
+          name: editDogName.trim(),
+          breed: editDogBreed.trim(),
+          age: parseFloat(editDogAge),
+          weight: parseFloat(editDogWeight),
+          ownerId: targetOwnerId,
+          ownerName: cleanOwner
+        };
+      }
+      return d;
+    });
+
+    setDogs(updatedDogs);
+    setIsEditProfileOpen(false);
+  };
+
+  // Delete Dog Profile (Admin Only)
+  const handleDeleteDog = (dogId: string) => {
+    if (!isAdmin) return;
+    if (confirm('Apakah Anda yakin ingin menghapus profil anjing ini dari sistem Dog Hotel?')) {
+      const updated = dogs.filter(d => d.id !== dogId);
+      setDogs(updated);
+      if (selectedDogId === dogId && updated.length > 0) {
+        setSelectedDogId(updated[0].id);
+      } else if (updated.length === 0) {
+        setSelectedDogId('');
+      }
+    }
+  };
+
+  // Save Settings Submit (Sensor Thresholds)
+  const handleSaveSettings = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeDog) return;
+
+    const updatedDogs = dogs.map(d => {
+      if (d.id === activeDog.id) {
+        return {
+          ...d,
+          settings: {
+            minHeartRate: parseInt(editMinHR),
+            maxHeartRate: parseInt(editMaxHR),
+            minSpO2: parseInt(editMinSpO2),
+            minTemp: parseFloat(editMinTemp),
+            maxTemp: parseFloat(editMaxTemp)
+          }
+        };
+      }
+      return d;
+    });
+
+    setDogs(updatedDogs);
+    setIsSettingsOpen(false);
+  };
+
+  // --- DATA GETTERS & CONVERTERS ---
+  const activeHistory = (activeDog && telemetryHistory[activeDog.id]) || [];
+  const latestTelemetry = activeHistory[activeHistory.length - 1];
+
+  const formatTemp = (celsius: number) => {
+    if (tempUnit === 'F') {
+      return `${(celsius * 1.8 + 32).toFixed(1)}°F`;
+    }
+    return `${celsius.toFixed(1)}°C`;
+  };
+
+  // Filter active alerts for visible dogs
+  const visibleDogIds = userDogs.map(d => d.id);
+  const activeAlerts = alerts.filter(a => visibleDogIds.includes(a.dogId) && !a.resolved);
+
+  const formatTime = (isoString: string) => {
+    const date = new Date(isoString);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+
+  // --- RENDERING AUTH VIEW ---
+  if (!currentUser) {
+    return (
+      <div className="auth-container">
+        <div className="auth-card glass-card">
+          <div className="logo-container" style={{ justifyContent: 'center', marginBottom: '1.25rem' }}>
+            <DogIcon size={32} className="logo-dog" />
+            <span className="logo-text">DOGWATCH</span>
+          </div>
+
+          <h2 className="auth-title">Portal Akses Dashboard</h2>
+          <p className="auth-subtitle">Pilih jenis akun untuk masuk ke sistem monitoring Smartwatch Anjing</p>
+
+          {/* Role Selection Tabs */}
+          <div className="role-selector">
+            <button 
+              type="button"
+              className={`role-btn ${authRole === 'admin' ? 'active-admin' : ''}`}
+              onClick={() => setAuthRole('admin')}
+            >
+              <Building2 size={16} />
+              <span>Dog Hotel (Admin)</span>
+            </button>
+            <button 
+              type="button"
+              className={`role-btn ${authRole === 'owner' ? 'active-owner' : ''}`}
+              onClick={() => setAuthRole('owner')}
+            >
+              <UserCheck size={16} />
+              <span>Pemilik Anjing (User)</span>
+            </button>
+          </div>
+
+          <form onSubmit={handleAuthSubmit}>
+            <div className="form-group">
+              <label className="form-label">Username</label>
+              <input 
+                type="text" 
+                className="form-input" 
+                value={authUsername}
+                onChange={(e) => setAuthUsername(e.target.value)}
+                placeholder={authRole === 'admin' ? 'e.g. admin' : 'e.g. willy atau budi'}
+                required
+              />
+            </div>
+            
+            {authMode === 'register' && (
+              <div className="form-group">
+                <label className="form-label">Nama Lengkap / Nama Hotel</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  value={authFullName}
+                  onChange={(e) => setAuthFullName(e.target.value)}
+                  placeholder={authRole === 'admin' ? 'e.g. Dog Hotel Petcare Grand' : 'e.g. Willy Suraya'}
+                />
+              </div>
+            )}
+
+            {authError && (
+              <div style={{ color: 'var(--color-critical)', fontSize: '0.85rem', marginBottom: '1rem', textAlign: 'center' }}>
+                {authError}
+              </div>
+            )}
+
+            <button type="submit" className="btn-primary" style={{ marginTop: '0.5rem' }}>
+              {authMode === 'login' 
+                ? (authRole === 'admin' ? 'Masuk sebagai Dog Hotel Admin' : 'Masuk sebagai Pemilik Anjing')
+                : (authRole === 'admin' ? 'Daftar Akun Dog Hotel Admin' : 'Daftar Akun Pemilik Anjing')}
+            </button>
+          </form>
+
+          <div className="auth-switch">
+            {authMode === 'login' ? (
+              <>
+                Belum memiliki akun?{' '}
+                <span className="auth-link" onClick={() => setAuthMode('register')}>
+                  Daftar Sekarang
+                </span>
+              </>
+            ) : (
+              <>
+                Sudah memiliki akun?{' '}
+                <span className="auth-link" onClick={() => setAuthMode('login')}>
+                  Sign In
+                </span>
+              </>
+            )}
+          </div>
+
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+      {/* HEADER */}
+      <header className="app-header">
+        <div className="logo-container">
+          <DogIcon size={28} className="logo-dog" />
+          <span className="logo-text">DOGWATCH</span>
+          <span className="sim-status-badge">
+            <Zap size={12} style={{ color: 'var(--accent-orange)' }} />
+            ESP32 SIMULATOR ON
+          </span>
+        </div>
+        <div className="header-actions">
+          <div className={`user-badge ${isAdmin ? 'badge-admin' : 'badge-owner'}`}>
+            {isAdmin ? <Building2 size={16} /> : <UserCheck size={16} />}
+            <span>
+              {isAdmin ? '🏨 Admin:' : '👤 Pemilik:'} <strong>{currentUser.fullName}</strong>
+            </span>
+          </div>
+          <button className="logout-btn" onClick={handleLogout}>
+            <LogOut size={16} />
+            <span>Keluar</span>
+          </button>
+        </div>
+      </header>
+
+      {/* DASHBOARD BODY */}
+      <div className="dashboard-container">
+        
+        {/* SIDE DOG SELECTOR BAR */}
+        <aside className="side-panel">
+          <div className="panel-header">
+            <span className="panel-title">{isAdmin ? 'Semua Anjing di Hotel' : 'Anjing Saya'}</span>
+            <span className="user-badge" style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}>
+              {userDogs.length} Ekor
+            </span>
+          </div>
+          
+          <div className="dog-list">
+            {userDogs.map(d => {
+              const isSelected = d.id === (activeDog?.id || selectedDogId);
+              const dogHist = telemetryHistory[d.id] || [];
+              const lastPacket = dogHist[dogHist.length - 1];
+              const isSleeping = lastPacket?.mpu6050.activityState === 'resting';
+              
+              return (
+                <div key={d.id} style={{ position: 'relative' }}>
+                  <button 
+                    className={`dog-card-btn ${isSelected ? 'active' : ''}`}
+                    onClick={() => setSelectedDogId(d.id)}
+                  >
+                    <div className="dog-avatar">
+                      {d.name.charAt(0)}
+                    </div>
+                    <div className="dog-info">
+                      <span className="dog-name">{d.name}</span>
+                      <span className="dog-breed">{d.breed}</span>
+                      <span className="owner-tag">
+                        👤 {d.ownerName || d.ownerId.replace('user-', '')}
+                      </span>
+                    </div>
+                    <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      {isSleeping ? (
+                        <Moon size={12} style={{ color: 'var(--accent-purple)' }} />
+                      ) : (
+                        <Activity size={12} style={{ color: 'var(--accent-cyan)' }} />
+                      )}
+                      <div className={`pulse-dot ${
+                        alerts.some(a => a.dogId === d.id && !a.resolved && a.severity === 'critical')
+                          ? 'pulse-critical'
+                          : alerts.some(a => a.dogId === d.id && !a.resolved && a.severity === 'warning')
+                          ? 'pulse-warning'
+                          : ''
+                      }`} />
+                    </div>
+                  </button>
+
+                  {/* Delete dog profile button (ADMIN ONLY) */}
+                  {isAdmin && (
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteDog(d.id);
+                      }}
+                      style={{
+                        position: 'absolute',
+                        right: '-6px',
+                        top: '-6px',
+                        background: 'var(--color-critical-bg)',
+                        border: '1px solid rgba(239,68,68,0.3)',
+                        borderRadius: '50%',
+                        width: '22px',
+                        height: '22px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'var(--color-critical)',
+                        cursor: 'pointer',
+                        fontSize: '9px',
+                        opacity: 0,
+                        transition: 'opacity 0.2s',
+                        zIndex: 10
+                      }}
+                      className="delete-dog-badge"
+                      title="Hapus Profil Anjing (Admin)"
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  )}
+
+                  <style dangerouslySetInnerHTML={{__html: `
+                    div:hover > .delete-dog-badge { opacity: 1 !important; }
+                  `}} />
+                </div>
+              );
+            })}
+
+            {/* Add Dog button (ADMIN ONLY) */}
+            {isAdmin ? (
+              <button className="btn-add-dog" onClick={() => setIsAddDogOpen(true)}>
+                <Plus size={16} />
+                <span>Tambah Anjing Baru</span>
+              </button>
+            ) : (
+              <div style={{ padding: '0.75rem', fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', border: '1px dashed rgba(255,255,255,0.08)', borderRadius: '8px' }}>
+                🔒 Mode Pemilik: Anda hanya dapat memantau anjing yang ditugaskan oleh Dog Hotel Admin.
+              </div>
+            )}
+          </div>
+
+          {/* TELEMETRY ALERT LOGS QUICK LOG */}
+          <div className="glass-card alerts-card" style={{ flex: 1, marginTop: '0.5rem' }}>
+            <div className="alerts-header">
+              <span className="alerts-title">Peringatan Kesehatan</span>
+              {activeAlerts.length > 0 && (
+                <span className="alerts-count critical">{activeAlerts.length}</span>
+              )}
+            </div>
+
+            <div className="alerts-list">
+              {activeAlerts.length === 0 ? (
+                <div className="empty-alerts">
+                  <Check size={24} style={{ color: 'var(--color-success)' }} />
+                  <span>Kondisi anjing aman dan stabil!</span>
+                </div>
+              ) : (
+                activeAlerts.map(alert => (
+                  <div key={alert.id} className={`alert-item severity-${alert.severity}`}>
+                    <AlertTriangle size={16} className="alert-icon" />
+                    <div className="alert-content">
+                      <span className="alert-msg">{alert.message}</span>
+                      <span className="alert-time">{formatTime(alert.timestamp)}</span>
+                    </div>
+                    <button 
+                      className="alert-resolve-btn" 
+                      onClick={() => handleResolveAlert(alert.id)}
+                      title="Selesaikan Peringatan"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {alerts.length > 0 && (
+              <button 
+                onClick={handleClearAllAlerts} 
+                style={{ 
+                  background: 'transparent', 
+                  border: 'none', 
+                  color: 'var(--text-muted)', 
+                  fontSize: '0.75rem', 
+                  cursor: 'pointer', 
+                  textAlign: 'right',
+                  marginTop: '0.5rem'
+                }}
+              >
+                Bersihkan Log Peringatan
+              </button>
+            )}
+          </div>
+        </aside>
+
+        {/* MAIN PANEL */}
+        {activeDog ? (
+          <main className="main-content">
+            
+            {/* ACTIVE DOG TITLE BANNER */}
+            <section className="glass-card dog-profile-summary">
+              <div className="summary-left">
+                <div className="summary-avatar">
+                  {activeDog.name.charAt(0)}
+                </div>
+                <div className="summary-details">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <h2>{activeDog.name}</h2>
+                    <span className="owner-tag" style={{ fontSize: '0.8rem', padding: '0.2rem 0.6rem' }}>
+                      👤 Pemilik: <strong>{activeDog.ownerName || activeDog.ownerId.replace('user-', '')}</strong>
+                    </span>
+                  </div>
+                  <div className="summary-meta">
+                    <div className="meta-item">
+                      <span>Ras/Jenis:</span>
+                      <strong style={{ color: 'var(--text-primary)' }}>{activeDog.breed}</strong>
+                    </div>
+                    <div className="meta-item">
+                      <span>Usia:</span>
+                      <strong style={{ color: 'var(--text-primary)' }}>{activeDog.age} Thn</strong>
+                    </div>
+                    <div className="meta-item">
+                      <span>Berat:</span>
+                      <strong style={{ color: 'var(--text-primary)' }}>{activeDog.weight} kg</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="summary-right">
+                <button 
+                  className="toggle-unit-btn"
+                  onClick={() => setTempUnit(prev => prev === 'C' ? 'F' : 'C')}
+                >
+                  <span>Suhu: °{tempUnit}</span>
+                </button>
+
+                {/* Edit Profile Button (ADMIN ONLY) */}
+                {isAdmin && (
+                  <button 
+                    className="btn-settings"
+                    onClick={() => handleOpenEditProfile(activeDog)}
+                    title="Edit Profil & Pemilik Anjing (Admin)"
+                    style={{ color: 'var(--accent-cyan)' }}
+                  >
+                    <Edit3 size={18} />
+                  </button>
+                )}
+
+                {/* Sensor Settings Button (ADMIN ONLY) */}
+                {isAdmin && (
+                  <button 
+                    className="btn-settings"
+                    onClick={() => setIsSettingsOpen(true)}
+                    title="Atur Batas Ambang Sensor (Admin)"
+                  >
+                    <Settings size={18} />
+                  </button>
+                )}
+              </div>
+            </section>
+
+            {/* LIVE TELEMETRY VITAL STATS DISPLAY */}
+            {latestTelemetry ? (
+              <section className="metrics-grid">
+                
+                {/* 1. HEART RATE */}
+                <div className="glass-card metric-card card-heart-rate">
+                  <div className="metric-header">
+                    <span>Detak Jantung (MAX30102)</span>
+                    <div className="metric-icon-box">
+                      <Heart size={18} fill="currentColor" />
+                    </div>
+                  </div>
+                  <div className="metric-value-container">
+                    <span className="metric-value">{latestTelemetry.max30102.heartRate}</span>
+                    <span className="metric-unit">BPM</span>
+                  </div>
+                  <div className="metric-footer">
+                    {latestTelemetry.max30102.heartRate > activeDog.settings.maxHeartRate ? (
+                      <span className="metric-footer-danger">● Tinggi / Stres (Batas: {activeDog.settings.maxHeartRate})</span>
+                    ) : latestTelemetry.max30102.heartRate < activeDog.settings.minHeartRate ? (
+                      <span className="metric-footer-warning">● Lemah (Batas: {activeDog.settings.minHeartRate})</span>
+                    ) : (
+                      <span className="metric-footer-success">● Normal (70-120 BPM)</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* 2. SPO2 OXYGEN */}
+                <div className="glass-card metric-card card-spo2">
+                  <div className="metric-header">
+                    <span>Saturasi Oksigen (MAX30102)</span>
+                    <div className="metric-icon-box">
+                      <Activity size={18} />
+                    </div>
+                  </div>
+                  <div className="metric-value-container">
+                    <span className="metric-value">{latestTelemetry.max30102.spo2}</span>
+                    <span className="metric-unit">%</span>
+                  </div>
+                  <div className="metric-footer">
+                    {latestTelemetry.max30102.spo2 < activeDog.settings.minSpO2 ? (
+                      <span className="metric-footer-danger">● Peringatan Hipoksia (&lt;{activeDog.settings.minSpO2}%)</span>
+                    ) : (
+                      <span className="metric-footer-success">● Oksigen Optimal</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* 3. TEMPERATURE */}
+                <div className="glass-card metric-card card-temperature">
+                  <div className="metric-header">
+                    <span>Suhu Tubuh (MLX90614)</span>
+                    <div className="metric-icon-box">
+                      <Thermometer size={18} />
+                    </div>
+                  </div>
+                  <div className="metric-value-container">
+                    <span className="metric-value">
+                      {tempUnit === 'F' 
+                        ? (latestTelemetry.mlx90614.bodyTemp * 1.8 + 32).toFixed(1)
+                        : latestTelemetry.mlx90614.bodyTemp.toFixed(1)
+                      }
+                    </span>
+                    <span className="metric-unit">°{tempUnit}</span>
+                  </div>
+                  <div className="metric-footer">
+                    {latestTelemetry.mlx90614.bodyTemp > activeDog.settings.maxTemp ? (
+                      <span className="metric-footer-danger">● Demam (Batas: {formatTemp(activeDog.settings.maxTemp)})</span>
+                    ) : latestTelemetry.mlx90614.bodyTemp < activeDog.settings.minTemp ? (
+                      <span className="metric-footer-warning">● Hipotermia (Batas: {formatTemp(activeDog.settings.minTemp)})</span>
+                    ) : (
+                      <span className="metric-footer-success">● Suhu Normal ({formatTemp(38.3)} - {formatTemp(39.2)})</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* 4. ACTIVITY & POSTURE */}
+                <div className="glass-card metric-card card-activity">
+                  <div className="metric-header">
+                    <span>Postur & Aktivitas (MPU6050)</span>
+                    <div className="metric-icon-box">
+                      <DogIcon size={18} />
+                    </div>
+                  </div>
+                  <div className="metric-value-container">
+                    <span className="metric-value" style={{ fontSize: '1.75rem', textTransform: 'capitalize' }}>
+                      {latestTelemetry.mpu6050.activityState}
+                    </span>
+                  </div>
+                  <div className="metric-footer" style={{ justifyContent: 'space-between', width: '100%' }}>
+                    <span>Postur: <strong style={{ color: 'var(--text-primary)', textTransform: 'capitalize' }}>{latestTelemetry.mpu6050.posture.replace('-', ' ')}</strong></span>
+                    <span className="metric-footer-success">{latestTelemetry.mpu6050.steps} langkah</span>
+                  </div>
+                </div>
+
+              </section>
+            ) : (
+              <div className="glass-card" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                Menunggu paket telemetri dari Smartwatch ESP32...
+              </div>
+            )}
+
+            {/* CHARTS SECTION */}
+            <section className="dashboard-mid">
+              
+              {/* HISTORICAL CHARTS CARD */}
+              <div className="glass-card chart-card">
+                <div className="chart-title-area">
+                  <span className="chart-title">Riwayat Tren Kesehatan</span>
+                  <div className="chart-controls">
+                    <button 
+                      className={`chart-tab-btn ${activeTab === 'realtime' ? 'active' : ''}`}
+                      onClick={() => setActiveTab('realtime')}
+                    >
+                      Metrik Utama
+                    </button>
+                    <button 
+                      className={`chart-tab-btn ${activeTab === 'mpu6050' ? 'active' : ''}`}
+                      onClick={() => setActiveTab('mpu6050')}
+                    >
+                      MPU6050 (Gerak)
+                    </button>
+                    <button 
+                      className={`chart-tab-btn ${activeTab === 'max30102' ? 'active' : ''}`}
+                      onClick={() => setActiveTab('max30102')}
+                    >
+                      MAX30102 (Pulsa)
+                    </button>
+                    <button 
+                      className={`chart-tab-btn ${activeTab === 'mlx90614' ? 'active' : ''}`}
+                      onClick={() => setActiveTab('mlx90614')}
+                    >
+                      MLX90614 (Suhu)
+                    </button>
+                  </div>
+                </div>
+
+                <div className="chart-wrapper">
+                  <ResponsiveContainer width="100%" height="100%">
+                    {activeTab === 'realtime' ? (
+                      <AreaChart data={activeHistory.map(h => ({
+                        time: formatTime(h.timestamp),
+                        heartRate: h.max30102.heartRate,
+                        spo2: h.max30102.spo2,
+                        bodyTemp: tempUnit === 'F' ? parseFloat((h.mlx90614.bodyTemp * 1.8 + 32).toFixed(1)) : h.mlx90614.bodyTemp
+                      }))}>
+                        <defs>
+                          <linearGradient id="colorHR" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="var(--color-critical)" stopOpacity={0.4}/>
+                            <stop offset="95%" stopColor="var(--color-critical)" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                        <XAxis dataKey="time" stroke="var(--text-muted)" fontSize={10} />
+                        <YAxis stroke="var(--text-muted)" fontSize={10} />
+                        <Tooltip contentStyle={{ background: '#141A26', borderColor: 'rgba(255,255,255,0.1)', color: '#fff' }} />
+                        <Area type="monotone" dataKey="heartRate" name="Heart Rate (BPM)" stroke="var(--color-critical)" fillOpacity={1} fill="url(#colorHR)" strokeWidth={2} />
+                        <Area type="monotone" dataKey="bodyTemp" name={`Body Temp (°${tempUnit})`} stroke="var(--color-warning)" fill="none" strokeWidth={2} />
+                      </AreaChart>
+                    ) : activeTab === 'mpu6050' ? (
+                      <AreaChart data={activeHistory.map(h => ({
+                        time: formatTime(h.timestamp),
+                        accelX: h.mpu6050.accelX,
+                        accelY: h.mpu6050.accelY,
+                        accelZ: h.mpu6050.accelZ,
+                        steps: h.mpu6050.steps
+                      }))}>
+                        <defs>
+                          <linearGradient id="colorAccel" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="var(--accent-orange)" stopOpacity={0.4}/>
+                            <stop offset="95%" stopColor="var(--accent-orange)" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                        <XAxis dataKey="time" stroke="var(--text-muted)" fontSize={10} />
+                        <YAxis stroke="var(--text-muted)" fontSize={10} />
+                        <Tooltip contentStyle={{ background: '#141A26', borderColor: 'rgba(255,255,255,0.1)', color: '#fff' }} />
+                        <Area type="monotone" dataKey="accelZ" name="Accel Z (G)" stroke="var(--accent-orange)" fillOpacity={1} fill="url(#colorAccel)" strokeWidth={2} />
+                        <Area type="monotone" dataKey="accelX" name="Accel X (G)" stroke="var(--accent-purple)" fill="none" strokeWidth={1} />
+                        <Area type="monotone" dataKey="accelY" name="Accel Y (G)" stroke="var(--accent-teal)" fill="none" strokeWidth={1} />
+                      </AreaChart>
+                    ) : activeTab === 'max30102' ? (
+                      <AreaChart data={activeHistory.map(h => ({
+                        time: formatTime(h.timestamp),
+                        heartRate: h.max30102.heartRate,
+                        spo2: h.max30102.spo2,
+                        hrv: h.max30102.hrv
+                      }))}>
+                        <defs>
+                          <linearGradient id="colorHRV" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="var(--accent-purple)" stopOpacity={0.4}/>
+                            <stop offset="95%" stopColor="var(--accent-purple)" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                        <XAxis dataKey="time" stroke="var(--text-muted)" fontSize={10} />
+                        <YAxis stroke="var(--text-muted)" fontSize={10} />
+                        <Tooltip contentStyle={{ background: '#141A26', borderColor: 'rgba(255,255,255,0.1)', color: '#fff' }} />
+                        <Area type="monotone" dataKey="spo2" name="SpO2 (%)" stroke="var(--accent-cyan)" fill="none" strokeWidth={2} />
+                        <Area type="monotone" dataKey="hrv" name="HRV (ms)" stroke="var(--accent-purple)" fillOpacity={1} fill="url(#colorHRV)" strokeWidth={2} />
+                      </AreaChart>
+                    ) : (
+                      <AreaChart data={activeHistory.map(h => ({
+                        time: formatTime(h.timestamp),
+                        bodyTemp: tempUnit === 'F' ? parseFloat((h.mlx90614.bodyTemp * 1.8 + 32).toFixed(1)) : h.mlx90614.bodyTemp,
+                        ambientTemp: tempUnit === 'F' ? parseFloat((h.mlx90614.ambientTemp * 1.8 + 32).toFixed(1)) : h.mlx90614.ambientTemp
+                      }))}>
+                        <defs>
+                          <linearGradient id="colorTemp" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="var(--color-warning)" stopOpacity={0.4}/>
+                            <stop offset="95%" stopColor="var(--color-warning)" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                        <XAxis dataKey="time" stroke="var(--text-muted)" fontSize={10} />
+                        <YAxis stroke="var(--text-muted)" fontSize={10} />
+                        <Tooltip contentStyle={{ background: '#141A26', borderColor: 'rgba(255,255,255,0.1)', color: '#fff' }} />
+                        <Area type="monotone" dataKey="bodyTemp" name={`Body Temp (°${tempUnit})`} stroke="var(--color-warning)" fillOpacity={1} fill="url(#colorTemp)" strokeWidth={2} />
+                        <Area type="monotone" dataKey="ambientTemp" name={`Ambient Temp (°${tempUnit})`} stroke="var(--accent-purple)" fill="none" strokeWidth={2} />
+                      </AreaChart>
+                    )}
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* HARDWARE OVERVIEW / SENSORS SUMMARY */}
+              <div className="glass-card chart-card" style={{ gap: '0.75rem' }}>
+                <span className="chart-title">Status Perangkat Smartwatch</span>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', height: '100%', justifyContent: 'center' }}>
+                  
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Activity size={16} style={{ color: 'var(--accent-orange)' }} />
+                      <span style={{ fontSize: '0.85rem' }}>MPU6050 (Gerak/Aktivitas)</span>
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--color-success)', fontWeight: '600' }}>ONLINE</span>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Heart size={16} style={{ color: 'var(--color-critical)' }} />
+                      <span style={{ fontSize: '0.85rem' }}>MAX30102 (Pulsa/SpO2)</span>
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--color-success)', fontWeight: '600' }}>ONLINE</span>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Thermometer size={16} style={{ color: 'var(--color-warning)' }} />
+                      <span style={{ fontSize: '0.85rem' }}>MLX90614 (Suhu IR)</span>
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--color-success)', fontWeight: '600' }}>ONLINE</span>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Zap size={16} style={{ color: 'var(--accent-cyan)' }} />
+                      <span style={{ fontSize: '0.85rem' }}>Baterai ESP32 Collar</span>
+                    </div>
+                    <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--accent-cyan)' }}>3.84 V (87%)</span>
+                  </div>
+
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.25rem', marginTop: '0.5rem' }}>
+                    <Info size={12} />
+                    <span>ESP32 siap menerima / mengirim telemetri via MQTT.</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* FLOATING ESP32 SIMULATOR CONTROL PANEL */}
+            <section className="glass-card simulator-panel">
+              <div className="simulator-header">
+                <div className="simulator-title-container">
+                  <Zap size={18} style={{ color: 'var(--accent-orange)' }} />
+                  <span className="simulator-title">ESP32 Hardware Telemetry Injector</span>
+                </div>
+                <div className="sim-status-badge">
+                  <span className="pulse-dot" style={{ width: '6px', height: '6px' }}></span>
+                  <span>SIMULATING HARDWARE LIVE</span>
+                </div>
+              </div>
+
+              {/* Presets Selection */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '600' }}>Simulasi Kondisi Anjing:</span>
+                <div className="simulator-presets">
+                  <button 
+                    className={`preset-btn ${simPreset === 'healthy' ? 'active' : ''}`}
+                    onClick={() => setSimPreset('healthy')}
+                  >
+                    Kondisi Normal
+                  </button>
+                  <button 
+                    className={`preset-btn ${simPreset === 'sleeping' ? 'active' : ''}`}
+                    onClick={() => setSimPreset('sleeping')}
+                  >
+                    Tidur Nyenyak
+                  </button>
+                  <button 
+                    className={`preset-btn ${simPreset === 'running' ? 'active' : ''}`}
+                    onClick={() => setSimPreset('running')}
+                  >
+                    Berlari Aktif
+                  </button>
+                  <button 
+                    className={`preset-btn ${simPreset === 'anxious' ? 'active' : ''}`}
+                    onClick={() => setSimPreset('anxious')}
+                  >
+                    Gelisah / Garuk
+                  </button>
+                  <button 
+                    className={`preset-btn ${simPreset === 'fever' ? 'active' : ''}`}
+                    onClick={() => setSimPreset('fever')}
+                  >
+                    Demam Tinggi
+                  </button>
+                  <button 
+                    className={`preset-btn ${simPreset === 'fall' ? 'active' : ''}`}
+                    onClick={() => setSimPreset('fall')}
+                  >
+                    Terjatuh / Impact
+                  </button>
+                </div>
+              </div>
+
+              {/* Slider Controls */}
+              <div className="simulator-sliders">
+                <div className="slider-group">
+                  <div className="slider-header">
+                    <span>Heart Rate (MAX30102)</span>
+                    <span className="slider-val">{simHeartRate} BPM</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min="50" 
+                    max="200" 
+                    className="slider-input"
+                    value={simHeartRate}
+                    onChange={(e) => {
+                      setSimHeartRate(parseInt(e.target.value));
+                      setSimPreset('healthy');
+                    }}
+                  />
+                </div>
+
+                <div className="slider-group">
+                  <div className="slider-header">
+                    <span>Oxygen SpO2 (MAX30102)</span>
+                    <span className="slider-val">{simSpO2}%</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min="80" 
+                    max="100" 
+                    className="slider-input"
+                    value={simSpO2}
+                    onChange={(e) => {
+                      setSimSpO2(parseInt(e.target.value));
+                      setSimPreset('healthy');
+                    }}
+                  />
+                </div>
+
+                <div className="slider-group">
+                  <div className="slider-header">
+                    <span>Suhu Tubuh (MLX90614)</span>
+                    <span className="slider-val">{simBodyTemp}°C</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min="36.0" 
+                    max="42.0" 
+                    step="0.1" 
+                    className="slider-input"
+                    value={simBodyTemp}
+                    onChange={(e) => {
+                      setSimBodyTemp(parseFloat(e.target.value));
+                      setSimPreset('healthy');
+                    }}
+                  />
+                </div>
+
+                <div className="slider-group">
+                  <div className="slider-header">
+                    <span>Suhu Sekitar (MLX90614)</span>
+                    <span className="slider-val">{simAmbientTemp}°C</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min="15.0" 
+                    max="45.0" 
+                    step="0.5" 
+                    className="slider-input"
+                    value={simAmbientTemp}
+                    onChange={(e) => setSimAmbientTemp(parseFloat(e.target.value))}
+                  />
+                </div>
+              </div>
+
+              {/* Behavior Dropdowns */}
+              <div className="simulator-select-group">
+                <div className="slider-group">
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Aktivitas (MPU6050)</span>
+                  <select 
+                    className="sim-select"
+                    value={simActivity}
+                    onChange={(e) => setSimActivity(e.target.value as ActivityStateType)}
+                  >
+                    <option value="resting">Resting (Istirahat)</option>
+                    <option value="walking">Walking (Jalan)</option>
+                    <option value="running">Running (Lari)</option>
+                    <option value="scratching">Scratching (Menggaruk)</option>
+                  </select>
+                </div>
+
+                <div className="slider-group">
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Postur Tubuh (MPU6050)</span>
+                  <select 
+                    className="sim-select"
+                    value={simPosture}
+                    onChange={(e) => setSimPosture(e.target.value as PostureType)}
+                  >
+                    <option value="standing">Berdiri (Standing)</option>
+                    <option value="sitting">Duduk (Sitting)</option>
+                    <option value="lying-side">Berbaring Miring</option>
+                    <option value="lying-chest">Berbaring Telungkup</option>
+                    <option value="running">Berlari</option>
+                    <option value="scratching">Menggaruk</option>
+                  </select>
+                </div>
+              </div>
+
+            </section>
+            
+          </main>
+        ) : (
+          /* EMPTY PACK STATE */
+          <div className="glass-card empty-dashboard">
+            <div className="empty-icon-box">
+              <DogIcon size={64} style={{ color: 'var(--text-muted)' }} />
+            </div>
+            <div className="empty-title">
+              <h2>{isAdmin ? 'Belum Ada Anjing Terdaftar' : 'Belum Ada Anjing Ditugaskan'}</h2>
+            </div>
+            <p className="empty-desc">
+              {isAdmin 
+                ? 'Sistem Dog Hotel belum memiliki profil anjing. Silakan tambahkan profil anjing pertama Anda dan hubungkan ke akun pemilik.' 
+                : `Akun Anda terdaftar sebagai Pemilik Anjing (${currentUser.fullName}). Pihak Dog Hotel Admin belum menugaskan anjing ke akun Anda. Silakan minta admin untuk mendaftarkan anjing Anda.`}
+            </p>
+
+            {isAdmin && (
+              <button className="btn-primary" onClick={() => setIsAddDogOpen(true)} style={{ maxWidth: '220px' }}>
+                Tambah Profil Anjing Pertama
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* FOOTER */}
+      <footer style={{ borderTop: 'var(--glass-border)', padding: '1.5rem', textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-muted)', background: 'rgba(11, 15, 23, 0.5)', marginTop: 'auto' }}>
+        &copy; {new Date().getFullYear()} Dogwatch Smart Collar Systems. Powered by ESP32 IoT & Dog Hotel Management.
+      </footer>
+
+      {/* --- ADD DOG MODAL (ADMIN ONLY) --- */}
+      {isAddDogOpen && isAdmin && (
+        <div className="modal-overlay">
+          <div className="glass-card modal-content">
+            <div className="modal-header">
+              <h3>Tambah Anjing Baru (Admin)</h3>
+              <button className="modal-close-btn" onClick={() => setIsAddDogOpen(false)}>
+                <X size={20} />
+              </button>
+            </div>
+            <form onSubmit={handleAddDog}>
+              <div className="form-group">
+                <label className="form-label">Nama Anjing</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  value={newDogName}
+                  onChange={(e) => setNewDogName(e.target.value)}
+                  placeholder="e.g. Rocky"
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Ras / Jenis Anjing</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  value={newDogBreed}
+                  onChange={(e) => setNewDogBreed(e.target.value)}
+                  placeholder="e.g. Husky / Poodle"
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Usia (Tahun)</label>
+                  <input 
+                    type="number" 
+                    step="0.1"
+                    min="0.1"
+                    className="form-input" 
+                    value={newDogAge}
+                    onChange={(e) => setNewDogAge(e.target.value)}
+                    placeholder="e.g. 2.5"
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Berat (Kg)</label>
+                  <input 
+                    type="number" 
+                    step="0.1"
+                    min="0.1"
+                    className="form-input" 
+                    value={newDogWeight}
+                    onChange={(e) => setNewDogWeight(e.target.value)}
+                    placeholder="e.g. 14.5"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Assign Owner Username */}
+              <div className="form-group">
+                <label className="form-label">Username Pemilik Anjing (Akses User)</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  value={newDogOwnerUsername}
+                  onChange={(e) => setNewDogOwnerUsername(e.target.value)}
+                  placeholder="e.g. willy atau budi"
+                  required
+                />
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
+                  💡 User dengan username ini yang nanti dapat memantau anjing ini saat login.
+                </span>
+              </div>
+
+              <div className="modal-footer">
+                <button type="button" className="btn-secondary" onClick={() => setIsAddDogOpen(false)}>
+                  Batal
+                </button>
+                <button type="submit" className="btn-primary">
+                  Buat Profil Anjing
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- EDIT DOG PROFILE MODAL (ADMIN ONLY) --- */}
+      {isEditProfileOpen && isAdmin && (
+        <div className="modal-overlay">
+          <div className="glass-card modal-content">
+            <div className="modal-header">
+              <h3>Edit Profil & Pemilik Anjing</h3>
+              <button className="modal-close-btn" onClick={() => setIsEditProfileOpen(false)}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditProfile}>
+              <div className="form-group">
+                <label className="form-label">Nama Anjing</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  value={editDogName}
+                  onChange={(e) => setEditDogName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Ras / Jenis Anjing</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  value={editDogBreed}
+                  onChange={(e) => setEditDogBreed(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Usia (Tahun)</label>
+                  <input 
+                    type="number" 
+                    step="0.1"
+                    className="form-input" 
+                    value={editDogAge}
+                    onChange={(e) => setEditDogAge(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Berat (Kg)</label>
+                  <input 
+                    type="number" 
+                    step="0.1"
+                    className="form-input" 
+                    value={editDogWeight}
+                    onChange={(e) => setEditDogWeight(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Username Pemilik (Akses User Monitoring)</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  value={editDogOwnerUsername}
+                  onChange={(e) => setEditDogOwnerUsername(e.target.value)}
+                  placeholder="e.g. willy atau budi"
+                  required
+                />
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
+                  💡 Ganti username ini untuk mengalihkan hak akses monitoring ke pemilik lain.
+                </span>
+              </div>
+
+              <div className="modal-footer">
+                <button type="button" className="btn-secondary" onClick={() => setIsEditProfileOpen(false)}>
+                  Batal
+                </button>
+                <button type="submit" className="btn-primary">
+                  Simpan Perubahan
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- SETTINGS / THRESHOLDS MODAL (ADMIN ONLY) --- */}
+      {isSettingsOpen && activeDog && isAdmin && (
+        <div className="modal-overlay">
+          <div className="glass-card modal-content">
+            <div className="modal-header">
+              <h3>Batas Ambang Peringatan {activeDog.name}</h3>
+              <button className="modal-close-btn" onClick={() => setIsSettingsOpen(false)}>
+                <X size={20} />
+              </button>
+            </div>
+            
+            <form onSubmit={handleSaveSettings}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem', padding: '0.75rem', background: 'var(--color-warning-bg)', borderRadius: '8px', border: '1px solid rgba(245,158,11,0.2)', fontSize: '0.8rem', color: 'var(--color-warning)' }}>
+                <ShieldAlert size={16} />
+                <span>Atur batas aman parameter vital untuk memicu peringatan otomatis di dashboard.</span>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Min Detak Jantung (BPM)</label>
+                  <input 
+                    type="number" 
+                    className="form-input"
+                    value={editMinHR}
+                    onChange={(e) => setEditMinHR(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Max Detak Jantung (BPM)</label>
+                  <input 
+                    type="number" 
+                    className="form-input"
+                    value={editMaxHR}
+                    onChange={(e) => setEditMaxHR(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Min Oksigen SpO2 (%)</label>
+                <input 
+                  type="number" 
+                  min="50" 
+                  max="100" 
+                  className="form-input"
+                  value={editMinSpO2}
+                  onChange={(e) => setEditMinSpO2(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Min Suhu Tubuh (°C)</label>
+                  <input 
+                    type="number" 
+                    step="0.1" 
+                    className="form-input"
+                    value={editMinTemp}
+                    onChange={(e) => setEditMinTemp(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Max Suhu Tubuh (°C)</label>
+                  <input 
+                    type="number" 
+                    step="0.1" 
+                    className="form-input"
+                    value={editMaxTemp}
+                    onChange={(e) => setEditMaxTemp(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button type="button" className="btn-secondary" onClick={() => setIsSettingsOpen(false)}>
+                  Batal
+                </button>
+                <button type="submit" className="btn-primary">
+                  Simpan Batas Ambang
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default App;
