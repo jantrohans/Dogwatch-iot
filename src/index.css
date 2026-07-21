@@ -568,6 +568,7 @@ body {
 
 .summary-meta {
   display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
   font-size: 0.85rem;
   color: var(--text-secondary);
