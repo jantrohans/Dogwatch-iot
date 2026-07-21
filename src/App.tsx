@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Dog as DogIcon, 
   Activity, 
@@ -9,15 +9,15 @@ import {
   LogOut, 
   AlertTriangle, 
   Check, 
-  X, 
-  Zap, 
+  X,
   Trash2, 
   ShieldAlert,
   Moon,
   Info,
   Building2,
   Edit3,
-  UserCheck
+  UserCheck,
+  Zap
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -29,6 +29,80 @@ import {
   CartesianGrid
 } from 'recharts';
 import { supabase } from './supabase';
+
+// ---- TYPE DEFINITIONS ----
+type UserRole = 'admin' | 'owner';
+
+interface UserType {
+  id: string;
+  username: string;
+  fullName: string;
+  role: UserRole;
+}
+
+type PostureType = 'standing' | 'sitting' | 'lying-side' | 'lying-chest' | 'running' | 'scratching';
+type ActivityStateType = 'resting' | 'walking' | 'running' | 'scratching';
+
+interface DogSettings {
+  minHeartRate: number;
+  maxHeartRate: number;
+  minSpO2: number;
+  minTemp: number;
+  maxTemp: number;
+}
+
+interface Dog {
+  id: string;
+  name: string;
+  breed: string;
+  age: number;
+  weight: number;
+  ownerId: string;
+  ownerName?: string;
+  settings: DogSettings;
+}
+
+interface TelemetryData {
+  dogId: string;
+  timestamp: string;
+  mpu6050: {
+    accelX: number;
+    accelY: number;
+    accelZ: number;
+    gyroX: number;
+    gyroY: number;
+    gyroZ: number;
+    steps: number;
+    activeMinutes: number;
+    posture: PostureType;
+    activityState: ActivityStateType;
+  };
+  max30102: {
+    heartRate: number;
+    spo2: number;
+    hrv: number;
+  };
+  mlx90614: {
+    bodyTemp: number;
+    ambientTemp: number;
+  };
+}
+
+type AlertType = 'heart_rate' | 'spo2' | 'fever' | 'hypothermia' | 'heatstroke' | 'fall';
+type AlertSeverity = 'warning' | 'critical';
+
+interface Alert {
+  id: string;
+  dogId: string;
+  dogName: string;
+  type: AlertType;
+  severity: AlertSeverity;
+  message: string;
+  timestamp: string;
+  resolved: boolean;
+}
+// ---- END TYPE DEFINITIONS ----
+
 
 function App() {
   // --- USERS & AUTH STATE ---
@@ -263,178 +337,6 @@ function App() {
     }
   }, [activeDog, isSettingsOpen]);
 
-  // Adjust simulator values when selected dog changes or preset changes
-  useEffect(() => {
-    if (!activeDog) return;
-    
-    const isSmall = activeDog.name.toLowerCase() === 'luna' || activeDog.breed.toLowerCase().includes('chihuahua');
-    
-    switch (simPreset) {
-      case 'healthy':
-        setSimHeartRate(isSmall ? 115 : 85);
-        setSimSpO2(98);
-        setSimBodyTemp(38.6);
-        setSimPosture('standing');
-        setSimActivity('resting');
-        setSimAccelX(0.08); setSimAccelY(-0.04); setSimAccelZ(0.98);
-        setSimGyroX(0.5); setSimGyroY(-0.3); setSimGyroZ(0.2);
-        break;
-      case 'sleeping':
-        setSimHeartRate(isSmall ? 98 : 72);
-        setSimSpO2(99);
-        setSimBodyTemp(38.2);
-        setSimPosture('lying-side');
-        setSimActivity('resting');
-        setSimAccelX(0.01); setSimAccelY(-0.01); setSimAccelZ(0.99);
-        setSimGyroX(0.1); setSimGyroY(-0.1); setSimGyroZ(0.05);
-        break;
-      case 'running':
-        setSimHeartRate(isSmall ? 155 : 125);
-        setSimSpO2(96);
-        setSimBodyTemp(39.1);
-        setSimPosture('running');
-        setSimActivity('running');
-        setSimAccelX(0.85); setSimAccelY(-0.55); setSimAccelZ(1.35);
-        setSimGyroX(32.4); setSimGyroY(-18.6); setSimGyroZ(24.1);
-        break;
-      case 'anxious':
-        setSimHeartRate(isSmall ? 165 : 138);
-        setSimSpO2(97);
-        setSimBodyTemp(38.9);
-        setSimPosture('scratching');
-        setSimActivity('scratching');
-        setSimAccelX(0.35); setSimAccelY(-0.25); setSimAccelZ(1.15);
-        setSimGyroX(15.2); setSimGyroY(-12.4); setSimGyroZ(10.1);
-        break;
-      case 'fever':
-        setSimHeartRate(isSmall ? 130 : 98);
-        setSimSpO2(95);
-        setSimBodyTemp(40.2);
-        setSimPosture('sitting');
-        setSimActivity('resting');
-        setSimAccelX(0.05); setSimAccelY(-0.03); setSimAccelZ(0.98);
-        setSimGyroX(0.2); setSimGyroY(-0.1); setSimGyroZ(0.1);
-        break;
-      case 'fall':
-        setSimHeartRate(isSmall ? 145 : 118);
-        setSimSpO2(96);
-        setSimBodyTemp(38.7);
-        setSimPosture('lying-side');
-        setSimActivity('resting');
-        setSimAccelX(3.8); setSimAccelY(2.9); setSimAccelZ(0.2);
-        setSimGyroX(120.5); setSimGyroY(95.4); setSimGyroZ(150.2);
-        break;
-    }
-  }, [simPreset, selectedDogId, activeDog]);
-
-  // --- SIMULATOR TELEMETRY HEARTBEAT ---
-  useEffect(() => {
-    if (!activeDog) return;
-
-    simIntervalRef.current = setInterval(() => {
-      setSimHeartRate(prev => {
-        const drift = (Math.random() - 0.5) * 4;
-        const newVal = Math.round(prev + drift);
-        return Math.max(40, Math.min(220, newVal));
-      });
-
-      setSimSpO2(prev => {
-        const drift = Math.random() > 0.85 ? (Math.random() > 0.5 ? 1 : -1) : 0;
-        return Math.max(80, Math.min(100, prev + drift));
-      });
-
-      setSimBodyTemp(prev => {
-        const drift = (Math.random() - 0.5) * 0.08;
-        return parseFloat(Math.max(35.0, Math.min(43.0, prev + drift)).toFixed(2));
-      });
-
-      setSimAmbientTemp(prev => {
-        const drift = (Math.random() - 0.5) * 0.15;
-        return parseFloat(Math.max(10.0, Math.min(45.0, prev + drift)).toFixed(2));
-      });
-
-      setSimAccelX(prev => parseFloat((prev + (Math.random() - 0.5) * 0.05).toFixed(3)));
-      setSimAccelY(prev => parseFloat((prev + (Math.random() - 0.5) * 0.05).toFixed(3)));
-      setSimAccelZ(prev => parseFloat((prev + (Math.random() - 0.5) * 0.05).toFixed(3)));
-      setSimGyroX(prev => parseFloat((prev + (Math.random() - 0.5) * 0.8).toFixed(2)));
-      setSimGyroY(prev => parseFloat((prev + (Math.random() - 0.5) * 0.8).toFixed(2)));
-      setSimGyroZ(prev => parseFloat((prev + (Math.random() - 0.5) * 0.8).toFixed(2)));
-
-      setSimSteps(prev => {
-        if (simActivity === 'running') return prev + Math.floor(Math.random() * 5) + 3;
-        if (simActivity === 'walking') return prev + Math.floor(Math.random() * 3) + 1;
-        return prev;
-      });
-
-      setTelemetryHistory(prevHist => {
-        const dogHist = prevHist[activeDog.id] || [];
-        const timestamp = new Date().toISOString();
-
-        const latestTelemetry: TelemetryData = {
-          dogId: activeDog.id,
-          timestamp,
-          mpu6050: {
-            accelX: parseFloat(simAccelX.toFixed(3)),
-            accelY: parseFloat(simAccelY.toFixed(3)),
-            accelZ: parseFloat(simAccelZ.toFixed(3)),
-            gyroX: parseFloat(simGyroX.toFixed(2)),
-            gyroY: parseFloat(simGyroY.toFixed(2)),
-            gyroZ: parseFloat(simGyroZ.toFixed(2)),
-            steps: simSteps,
-            activeMinutes: simActiveMinutes,
-            posture: simPosture,
-            activityState: simActivity
-          },
-          max30102: {
-            heartRate: simHeartRate,
-            spo2: simSpO2,
-            hrv: simPreset === 'sleeping' ? 58 + Math.floor(Math.random() * 4) : 40 + Math.floor(Math.random() * 8)
-          },
-          mlx90614: {
-            bodyTemp: simBodyTemp,
-            ambientTemp: simAmbientTemp
-          }
-        };
-
-        checkThresholds(latestTelemetry);
-
-        const newHist = [...dogHist, latestTelemetry];
-        if (newHist.length > 30) newHist.shift();
-        
-        return {
-          ...prevHist,
-          [activeDog.id]: newHist
-        };
-      });
-    }, 2000);
-
-    return () => {
-      if (simIntervalRef.current) clearInterval(simIntervalRef.current);
-    };
-  }, [
-    activeDog,
-    simHeartRate, 
-    simSpO2, 
-    simBodyTemp, 
-    simAmbientTemp, 
-    simPosture, 
-    simActivity, 
-    simSteps, 
-    simActiveMinutes,
-    simAccelX, simAccelY, simAccelZ,
-    simGyroX, simGyroY, simGyroZ,
-    simPreset,
-    dogs
-  ]);
-
-  useEffect(() => {
-    const minutesInterval = setInterval(() => {
-      if (simActivity === 'running' || simActivity === 'walking' || simActivity === 'scratching') {
-        setSimActiveMinutes(prev => prev + 1);
-      }
-    }, 60000);
-    return () => clearInterval(minutesInterval);
-  }, [simActivity]);
 
   // --- THRESHOLD CHECKING LOGIC ---
   const checkThresholds = (data: TelemetryData) => {
@@ -503,7 +405,7 @@ function App() {
       data.mpu6050.accelY * data.mpu6050.accelY +
       data.mpu6050.accelZ * data.mpu6050.accelZ
     );
-    if (accelMagnitude > 3.0 && simPreset === 'fall') {
+    if (accelMagnitude > 3.0) {
       newAlerts.push({
         dogId: activeDog.id,
         dogName: activeDog.name,
@@ -1410,171 +1312,6 @@ function App() {
                   </div>
                 </div>
               </div>
-            </section>
-
-            {/* FLOATING ESP32 SIMULATOR CONTROL PANEL */}
-            <section className="glass-card simulator-panel">
-              <div className="simulator-header">
-                <div className="simulator-title-container">
-                  <Zap size={18} style={{ color: 'var(--accent-orange)' }} />
-                  <span className="simulator-title">ESP32 Hardware Telemetry Injector</span>
-                </div>
-                <div className="sim-status-badge">
-                  <span className="pulse-dot" style={{ width: '6px', height: '6px' }}></span>
-                  <span>SIMULATING HARDWARE LIVE</span>
-                </div>
-              </div>
-
-              {/* Presets Selection */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '600' }}>Simulasi Kondisi Anjing:</span>
-                <div className="simulator-presets">
-                  <button 
-                    className={`preset-btn ${simPreset === 'healthy' ? 'active' : ''}`}
-                    onClick={() => setSimPreset('healthy')}
-                  >
-                    Kondisi Normal
-                  </button>
-                  <button 
-                    className={`preset-btn ${simPreset === 'sleeping' ? 'active' : ''}`}
-                    onClick={() => setSimPreset('sleeping')}
-                  >
-                    Tidur Nyenyak
-                  </button>
-                  <button 
-                    className={`preset-btn ${simPreset === 'running' ? 'active' : ''}`}
-                    onClick={() => setSimPreset('running')}
-                  >
-                    Berlari Aktif
-                  </button>
-                  <button 
-                    className={`preset-btn ${simPreset === 'anxious' ? 'active' : ''}`}
-                    onClick={() => setSimPreset('anxious')}
-                  >
-                    Gelisah / Garuk
-                  </button>
-                  <button 
-                    className={`preset-btn ${simPreset === 'fever' ? 'active' : ''}`}
-                    onClick={() => setSimPreset('fever')}
-                  >
-                    Demam Tinggi
-                  </button>
-                  <button 
-                    className={`preset-btn ${simPreset === 'fall' ? 'active' : ''}`}
-                    onClick={() => setSimPreset('fall')}
-                  >
-                    Terjatuh / Impact
-                  </button>
-                </div>
-              </div>
-
-              {/* Slider Controls */}
-              <div className="simulator-sliders">
-                <div className="slider-group">
-                  <div className="slider-header">
-                    <span>Heart Rate (MAX30102)</span>
-                    <span className="slider-val">{simHeartRate} BPM</span>
-                  </div>
-                  <input 
-                    type="range" 
-                    min="50" 
-                    max="200" 
-                    className="slider-input"
-                    value={simHeartRate}
-                    onChange={(e) => {
-                      setSimHeartRate(parseInt(e.target.value));
-                      setSimPreset('healthy');
-                    }}
-                  />
-                </div>
-
-                <div className="slider-group">
-                  <div className="slider-header">
-                    <span>Oxygen SpO2 (MAX30102)</span>
-                    <span className="slider-val">{simSpO2}%</span>
-                  </div>
-                  <input 
-                    type="range" 
-                    min="80" 
-                    max="100" 
-                    className="slider-input"
-                    value={simSpO2}
-                    onChange={(e) => {
-                      setSimSpO2(parseInt(e.target.value));
-                      setSimPreset('healthy');
-                    }}
-                  />
-                </div>
-
-                <div className="slider-group">
-                  <div className="slider-header">
-                    <span>Suhu Tubuh (MLX90614)</span>
-                    <span className="slider-val">{simBodyTemp}°C</span>
-                  </div>
-                  <input 
-                    type="range" 
-                    min="36.0" 
-                    max="42.0" 
-                    step="0.1" 
-                    className="slider-input"
-                    value={simBodyTemp}
-                    onChange={(e) => {
-                      setSimBodyTemp(parseFloat(e.target.value));
-                      setSimPreset('healthy');
-                    }}
-                  />
-                </div>
-
-                <div className="slider-group">
-                  <div className="slider-header">
-                    <span>Suhu Sekitar (MLX90614)</span>
-                    <span className="slider-val">{simAmbientTemp}°C</span>
-                  </div>
-                  <input 
-                    type="range" 
-                    min="15.0" 
-                    max="45.0" 
-                    step="0.5" 
-                    className="slider-input"
-                    value={simAmbientTemp}
-                    onChange={(e) => setSimAmbientTemp(parseFloat(e.target.value))}
-                  />
-                </div>
-              </div>
-
-              {/* Behavior Dropdowns */}
-              <div className="simulator-select-group">
-                <div className="slider-group">
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Aktivitas (MPU6050)</span>
-                  <select 
-                    className="sim-select"
-                    value={simActivity}
-                    onChange={(e) => setSimActivity(e.target.value as ActivityStateType)}
-                  >
-                    <option value="resting">Resting (Istirahat)</option>
-                    <option value="walking">Walking (Jalan)</option>
-                    <option value="running">Running (Lari)</option>
-                    <option value="scratching">Scratching (Menggaruk)</option>
-                  </select>
-                </div>
-
-                <div className="slider-group">
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Postur Tubuh (MPU6050)</span>
-                  <select 
-                    className="sim-select"
-                    value={simPosture}
-                    onChange={(e) => setSimPosture(e.target.value as PostureType)}
-                  >
-                    <option value="standing">Berdiri (Standing)</option>
-                    <option value="sitting">Duduk (Sitting)</option>
-                    <option value="lying-side">Berbaring Miring</option>
-                    <option value="lying-chest">Berbaring Telungkup</option>
-                    <option value="running">Berlari</option>
-                    <option value="scratching">Menggaruk</option>
-                  </select>
-                </div>
-              </div>
-
             </section>
             
           </main>
