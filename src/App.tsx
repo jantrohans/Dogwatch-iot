@@ -28,141 +28,23 @@ import {
   Tooltip,
   CartesianGrid
 } from 'recharts';
-import type { User as UserType, Dog, TelemetryData, Alert, PostureType, ActivityStateType, UserRole } from './types';
-import './App.css';
-
-// Pre-configured default users for demo
-const DEFAULT_USERS: UserType[] = [
-  {
-    id: 'user-admin',
-    username: 'admin',
-    fullName: 'Dog Hotel Grand (Admin)',
-    role: 'admin'
-  },
-  {
-    id: 'user-willy',
-    username: 'willy',
-    fullName: 'Willy (Pemilik)',
-    role: 'owner'
-  },
-  {
-    id: 'user-budi',
-    username: 'budi',
-    fullName: 'Budi (Pemilik)',
-    role: 'owner'
-  }
-];
-
-// Pre-configured initial dogs assigned to specific owners
-const DEFAULT_DOGS: Dog[] = [
-  {
-    id: 'dog-buddy',
-    name: 'Buddy',
-    breed: 'Golden Retriever',
-    age: 3,
-    weight: 32,
-    ownerId: 'user-willy',
-    ownerName: 'willy',
-    settings: {
-      minHeartRate: 70,
-      maxHeartRate: 120,
-      minSpO2: 94,
-      minTemp: 37.8,
-      maxTemp: 39.4
-    }
-  },
-  {
-    id: 'dog-luna',
-    name: 'Luna',
-    breed: 'Chihuahua',
-    age: 2,
-    weight: 3.5,
-    ownerId: 'user-budi',
-    ownerName: 'budi',
-    settings: {
-      minHeartRate: 100,
-      maxHeartRate: 150,
-      minSpO2: 95,
-      minTemp: 38.0,
-      maxTemp: 39.6
-    }
-  }
-];
-
-// Helper to generate mock historical telemetry data
-const generateMockHistory = (dogId: string, count: number): TelemetryData[] => {
-  const history: TelemetryData[] = [];
-  const baseTime = Date.now() - count * 5000;
-  const isSmallDog = dogId.includes('luna');
-  const baseHR = isSmallDog ? 110 : 80;
-  
-  for (let i = 0; i < count; i++) {
-    const time = new Date(baseTime + i * 5000).toISOString();
-    const isSleeping = i < count / 2;
-    
-    history.push({
-      dogId,
-      timestamp: time,
-      mpu6050: {
-        accelX: isSleeping ? 0.02 : 0.45 + Math.random() * 0.2,
-        accelY: isSleeping ? -0.01 : -0.21 + Math.random() * 0.2,
-        accelZ: isSleeping ? 0.98 : 0.85 + Math.random() * 0.2,
-        gyroX: isSleeping ? 0.1 : 5.4 + Math.random() * 5,
-        gyroY: isSleeping ? -0.2 : -2.1 + Math.random() * 4,
-        gyroZ: isSleeping ? 0.15 : 1.2 + Math.random() * 3,
-        steps: isSleeping ? 420 : 420 + i * 2,
-        activeMinutes: isSleeping ? 12 : 12 + Math.floor(i / 10),
-        posture: isSleeping ? 'lying-side' : 'standing',
-        activityState: isSleeping ? 'resting' : 'walking'
-      },
-      max30102: {
-        heartRate: baseHR + (isSleeping ? -5 : 10) + Math.floor(Math.random() * 6),
-        spo2: 97 + Math.floor(Math.random() * 3),
-        hrv: 45 + (isSleeping ? 15 : -5) + Math.floor(Math.random() * 10)
-      },
-      mlx90614: {
-        bodyTemp: 38.4 + (isSleeping ? -0.2 : 0.3) + parseFloat((Math.random() * 0.3).toFixed(2)),
-        ambientTemp: 24.5 + parseFloat((Math.random() * 0.8).toFixed(2))
-      }
-    });
-  }
-  return history;
-};
+import { supabase } from './supabase';
 
 function App() {
   // --- USERS & AUTH STATE ---
-  const [registeredUsers, setRegisteredUsers] = useState<UserType[]>(() => {
-    const stored = localStorage.getItem('dogwatch_users');
-    return stored ? JSON.parse(stored) : DEFAULT_USERS;
-  });
-
+  const [registeredUsers, setRegisteredUsers] = useState<UserType[]>([]);
   const [currentUser, setCurrentUser] = useState<UserType | null>(() => {
     const stored = localStorage.getItem('dogwatch_user');
-    return stored ? JSON.parse(stored) : DEFAULT_USERS[0]; // Admin default
+    return stored ? JSON.parse(stored) : null;
   });
 
   // --- DOGS STATE ---
-  const [dogs, setDogs] = useState<Dog[]>(() => {
-    const stored = localStorage.getItem('dogwatch_dogs');
-    return stored ? JSON.parse(stored) : DEFAULT_DOGS;
-  });
+  const [dogs, setDogs] = useState<Dog[]>([]);
+  const [selectedDogId, setSelectedDogId] = useState<string>('');
 
-  const [selectedDogId, setSelectedDogId] = useState<string>('dog-buddy');
+  const [telemetryHistory, setTelemetryHistory] = useState<Record<string, TelemetryData[]>>({});
+  const [alerts, setAlerts] = useState<Alert[]>([]);
 
-  const [telemetryHistory, setTelemetryHistory] = useState<Record<string, TelemetryData[]>>(() => {
-    const initialHist: Record<string, TelemetryData[]> = {};
-    const storedDogs = localStorage.getItem('dogwatch_dogs');
-    const dogList: Dog[] = storedDogs ? JSON.parse(storedDogs) : DEFAULT_DOGS;
-    dogList.forEach(dog => {
-      initialHist[dog.id] = generateMockHistory(dog.id, 20);
-    });
-    return initialHist;
-  });
-
-  const [alerts, setAlerts] = useState<Alert[]>(() => {
-    localStorage.removeItem('dogwatch_alerts');
-    return [];
-  });
 
   // Auth Screen toggles & form state
   const [authRole, setAuthRole] = useState<UserRole>('admin');
@@ -202,26 +84,6 @@ function App() {
   const [tempUnit, setTempUnit] = useState<'C' | 'F'>('C');
   const [activeTab, setActiveTab] = useState<'realtime' | 'mpu6050' | 'max30102' | 'mlx90614'>('realtime');
 
-  // --- HARDWARE SIMULATOR STATE ---
-  const [simPreset, setSimPreset] = useState<'healthy' | 'sleeping' | 'running' | 'anxious' | 'fever' | 'fall'>('healthy');
-  const [simHeartRate, setSimHeartRate] = useState(85);
-  const [simSpO2, setSimSpO2] = useState(98);
-  const [simBodyTemp, setSimBodyTemp] = useState(38.5);
-  const [simAmbientTemp, setSimAmbientTemp] = useState(25.0);
-  const [simPosture, setSimPosture] = useState<PostureType>('standing');
-  const [simActivity, setSimActivity] = useState<ActivityStateType>('resting');
-  const [simSteps, setSimSteps] = useState(1200);
-  const [simActiveMinutes, setSimActiveMinutes] = useState(35);
-  
-  const [simAccelX, setSimAccelX] = useState(0.12);
-  const [simAccelY, setSimAccelY] = useState(-0.05);
-  const [simAccelZ, setSimAccelZ] = useState(0.97);
-  const [simGyroX, setSimGyroX] = useState(1.2);
-  const [simGyroY, setSimGyroY] = useState(-0.8);
-  const [simGyroZ, setSimGyroZ] = useState(0.4);
-
-  const simIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   // --- ROLE BASED DOG FILTERING ---
   const isAdmin = currentUser?.role === 'admin';
 
@@ -237,18 +99,147 @@ function App() {
   // Current active selected dog object
   const activeDog = userDogs.find(d => d.id === selectedDogId) || userDogs[0];
 
-  // --- PERSISTENCE EFFECT ---
+  // --- SUPABASE DATA FETCHING & REALTIME ---
   useEffect(() => {
-    localStorage.setItem('dogwatch_dogs', JSON.stringify(dogs));
-  }, [dogs]);
+    const fetchData = async () => {
+      // Fetch Users
+      const { data: usersData } = await supabase.from('users').select('*');
+      if (usersData) setRegisteredUsers(usersData as UserType[]);
 
-  useEffect(() => {
-    localStorage.setItem('dogwatch_users', JSON.stringify(registeredUsers));
-  }, [registeredUsers]);
+      // Fetch Dogs
+      const { data: dogsData } = await supabase.from('dogs').select('*');
+      if (dogsData) {
+        // Parse settings which might be stored as JSON if we added it to schema, 
+        // but wait, in SQL we didn't add settings column! We need default settings for now.
+        const parsedDogs = dogsData.map(d => ({
+          ...d,
+          settings: {
+            minHeartRate: 70,
+            maxHeartRate: 130,
+            minSpO2: 94,
+            minTemp: 37.8,
+            maxTemp: 39.5
+          }
+        })) as Dog[];
+        setDogs(parsedDogs);
+      }
+    };
 
+    fetchData();
+  }, []);
+
+  // Fetch initial telemetry for the selected dog
   useEffect(() => {
-    localStorage.setItem('dogwatch_alerts', JSON.stringify(alerts));
-  }, [alerts]);
+    if (!selectedDogId) return;
+
+    const fetchInitialTelemetry = async () => {
+      const { data } = await supabase
+        .from('telemetry')
+        .select('*')
+        .eq('dog_id', selectedDogId)
+        .order('timestamp', { ascending: false })
+        .limit(30);
+
+      if (data && data.length > 0) {
+        const formattedData: TelemetryData[] = data.reverse().map(row => ({
+          dogId: row.dog_id,
+          timestamp: row.timestamp,
+          mpu6050: {
+            accelX: row.accel_x || 0,
+            accelY: row.accel_y || 0,
+            accelZ: row.accel_z || 0,
+            gyroX: row.gyro_x || 0,
+            gyroY: row.gyro_y || 0,
+            gyroZ: row.gyro_z || 0,
+            steps: row.steps || 0,
+            activeMinutes: row.active_minutes || 0,
+            posture: row.posture || 'standing',
+            activityState: row.activity_state || 'resting'
+          },
+          max30102: {
+            heartRate: row.heart_rate || 0,
+            spo2: row.spo2 || 0,
+            hrv: row.hrv || 0
+          },
+          mlx90614: {
+            bodyTemp: row.body_temp || 0,
+            ambientTemp: row.ambient_temp || 0
+          }
+        }));
+
+        setTelemetryHistory(prev => ({
+          ...prev,
+          [selectedDogId]: formattedData
+        }));
+      }
+    };
+
+    fetchInitialTelemetry();
+  }, [selectedDogId]);
+
+  // Realtime Subscription for Telemetry
+  useEffect(() => {
+    if (!activeDog) return;
+
+    const channel = supabase
+      .channel('schema-db-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'telemetry',
+          filter: `dog_id=eq.${activeDog.id}`
+        },
+        (payload) => {
+          const row = payload.new;
+          const newTelemetry: TelemetryData = {
+            dogId: row.dog_id,
+            timestamp: row.timestamp,
+            mpu6050: {
+              accelX: row.accel_x || 0,
+              accelY: row.accel_y || 0,
+              accelZ: row.accel_z || 0,
+              gyroX: row.gyro_x || 0,
+              gyroY: row.gyro_y || 0,
+              gyroZ: row.gyro_z || 0,
+              steps: row.steps || 0,
+              activeMinutes: row.active_minutes || 0,
+              posture: row.posture || 'standing',
+              activityState: row.activity_state || 'resting'
+            },
+            max30102: {
+              heartRate: row.heart_rate || 0,
+              spo2: row.spo2 || 0,
+              hrv: row.hrv || 0
+            },
+            mlx90614: {
+              bodyTemp: row.body_temp || 0,
+              ambientTemp: row.ambient_temp || 0
+            }
+          };
+
+          checkThresholds(newTelemetry);
+
+          setTelemetryHistory(prevHist => {
+            const dogHist = prevHist[activeDog.id] || [];
+            const newHist = [...dogHist, newTelemetry];
+            if (newHist.length > 30) newHist.shift();
+            
+            return {
+              ...prevHist,
+              [activeDog.id]: newHist
+            };
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeDog]);
+
 
   // Keep selectedDogId valid when switching users or editing dogs
   useEffect(() => {
@@ -559,7 +550,7 @@ function App() {
   // --- ACTIONS & HANDLERS ---
 
   // Auth Submit (Login / Register)
-  const handleAuthSubmit = (e: React.FormEvent) => {
+  const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!authUsername.trim()) {
       setAuthError('Username wajib diisi!');
@@ -575,7 +566,7 @@ function App() {
         setCurrentUser(existing);
         localStorage.setItem('dogwatch_user', JSON.stringify(existing));
       } else {
-        // Auto create user with chosen role
+        // Auto create user with chosen role in Supabase
         const userId = `user-${cleanUsername}`;
         const newUser: UserType = {
           id: userId,
@@ -583,9 +574,14 @@ function App() {
           fullName: authFullName.trim() || (authRole === 'admin' ? `Admin (${cleanUsername})` : `Pemilik (${cleanUsername})`),
           role: authRole
         };
-        setRegisteredUsers(prev => [...prev, newUser]);
-        setCurrentUser(newUser);
-        localStorage.setItem('dogwatch_user', JSON.stringify(newUser));
+        const { error } = await supabase.from('users').insert(newUser);
+        if (!error) {
+          setRegisteredUsers(prev => [...prev, newUser]);
+          setCurrentUser(newUser);
+          localStorage.setItem('dogwatch_user', JSON.stringify(newUser));
+        } else {
+          setAuthError('Gagal membuat akun di database.');
+        }
       }
     } else {
       // Register new account
@@ -602,9 +598,14 @@ function App() {
         fullName: authFullName.trim() || (authRole === 'admin' ? `Admin (${cleanUsername})` : `Pemilik (${cleanUsername})`),
         role: authRole
       };
-      setRegisteredUsers(prev => [...prev, newUser]);
-      setCurrentUser(newUser);
-      localStorage.setItem('dogwatch_user', JSON.stringify(newUser));
+      const { error } = await supabase.from('users').insert(newUser);
+      if (!error) {
+        setRegisteredUsers(prev => [...prev, newUser]);
+        setCurrentUser(newUser);
+        localStorage.setItem('dogwatch_user', JSON.stringify(newUser));
+      } else {
+        setAuthError('Gagal membuat akun di database.');
+      }
     }
 
     setAuthError('');
@@ -616,11 +617,11 @@ function App() {
   };
 
   // Add Dog Submit (Admin Only)
-  const handleAddDog = (e: React.FormEvent) => {
+  const handleAddDog = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDogName.trim() || !newDogBreed.trim() || !newDogAge || !newDogWeight) return;
 
-    const dogId = `dog-${newDogName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
+    const dogId = `dog-${newDogName.toLowerCase().replace(/\\s+/g, '-')}-${Date.now()}`;
     const cleanOwner = newDogOwnerUsername.trim().toLowerCase() || 'willy';
     let targetOwnerId = `user-${cleanOwner}`;
 
@@ -634,41 +635,48 @@ function App() {
         fullName: `${cleanOwner} (Pemilik)`,
         role: 'owner'
       };
+      await supabase.from('users').insert(newOwner);
       setRegisteredUsers(prev => [...prev, newOwner]);
     }
 
-    const newDog: Dog = {
+    const newDogRecord = {
       id: dogId,
       name: newDogName.trim(),
       breed: newDogBreed.trim(),
       age: parseFloat(newDogAge),
       weight: parseFloat(newDogWeight),
       ownerId: targetOwnerId,
-      ownerName: cleanOwner,
-      settings: {
-        minHeartRate: 70,
-        maxHeartRate: 130,
-        minSpO2: 94,
-        minTemp: 37.8,
-        maxTemp: 39.5
-      }
+      ownerName: cleanOwner
     };
-
-    const updatedDogs = [...dogs, newDog];
-    setDogs(updatedDogs);
-    setSelectedDogId(dogId);
     
-    setTelemetryHistory(prev => ({
-      ...prev,
-      [dogId]: generateMockHistory(dogId, 20)
-    }));
+    const { error } = await supabase.from('dogs').insert(newDogRecord);
 
-    setNewDogName('');
-    setNewDogBreed('');
-    setNewDogAge('');
-    setNewDogWeight('');
-    setNewDogOwnerUsername('willy');
-    setIsAddDogOpen(false);
+    if (!error) {
+      const newDogState: Dog = {
+        ...newDogRecord,
+        settings: {
+          minHeartRate: 70,
+          maxHeartRate: 130,
+          minSpO2: 94,
+          minTemp: 37.8,
+          maxTemp: 39.5
+        }
+      };
+      setDogs([...dogs, newDogState]);
+      setSelectedDogId(dogId);
+      
+      setTelemetryHistory(prev => ({
+        ...prev,
+        [dogId]: []
+      }));
+  
+      setNewDogName('');
+      setNewDogBreed('');
+      setNewDogAge('');
+      setNewDogWeight('');
+      setNewDogOwnerUsername('willy');
+      setIsAddDogOpen(false);
+    }
   };
 
   // Open Edit Profile Modal (Admin Only)
@@ -683,7 +691,7 @@ function App() {
   };
 
   // Save Edited Dog Profile (Admin Only)
-  const handleSaveEditProfile = (e: React.FormEvent) => {
+  const handleSaveEditProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingDogId) return;
 
@@ -700,38 +708,48 @@ function App() {
         fullName: `${cleanOwner} (Pemilik)`,
         role: 'owner'
       };
+      await supabase.from('users').insert(newOwner);
       setRegisteredUsers(prev => [...prev, newOwner]);
     }
 
-    const updatedDogs = dogs.map(d => {
-      if (d.id === editingDogId) {
-        return {
-          ...d,
-          name: editDogName.trim(),
-          breed: editDogBreed.trim(),
-          age: parseFloat(editDogAge),
-          weight: parseFloat(editDogWeight),
-          ownerId: targetOwnerId,
-          ownerName: cleanOwner
-        };
-      }
-      return d;
-    });
+    const updateRecord = {
+      name: editDogName.trim(),
+      breed: editDogBreed.trim(),
+      age: parseFloat(editDogAge),
+      weight: parseFloat(editDogWeight),
+      ownerId: targetOwnerId,
+      ownerName: cleanOwner
+    };
 
-    setDogs(updatedDogs);
-    setIsEditProfileOpen(false);
+    const { error } = await supabase.from('dogs').update(updateRecord).eq('id', editingDogId);
+
+    if (!error) {
+      const updatedDogs = dogs.map(d => {
+        if (d.id === editingDogId) {
+          return { ...d, ...updateRecord };
+        }
+        return d;
+      });
+  
+      setDogs(updatedDogs);
+      setIsEditProfileOpen(false);
+    }
   };
 
   // Delete Dog Profile (Admin Only)
-  const handleDeleteDog = (dogId: string) => {
+  const handleDeleteDog = async (dogId: string) => {
     if (!isAdmin) return;
     if (confirm('Apakah Anda yakin ingin menghapus profil anjing ini dari sistem Dog Hotel?')) {
-      const updated = dogs.filter(d => d.id !== dogId);
-      setDogs(updated);
-      if (selectedDogId === dogId && updated.length > 0) {
-        setSelectedDogId(updated[0].id);
-      } else if (updated.length === 0) {
-        setSelectedDogId('');
+      const { error } = await supabase.from('dogs').delete().eq('id', dogId);
+      
+      if (!error) {
+        const updated = dogs.filter(d => d.id !== dogId);
+        setDogs(updated);
+        if (selectedDogId === dogId && updated.length > 0) {
+          setSelectedDogId(updated[0].id);
+        } else if (updated.length === 0) {
+          setSelectedDogId('');
+        }
       }
     }
   };
@@ -883,10 +901,6 @@ function App() {
         <div className="logo-container">
           <DogIcon size={28} className="logo-dog" />
           <span className="logo-text">DOGWATCH</span>
-          <span className="sim-status-badge">
-            <Zap size={12} style={{ color: 'var(--accent-orange)' }} />
-            ESP32 SIMULATOR ON
-          </span>
         </div>
         <div className="header-actions">
           <div className={`user-badge ${isAdmin ? 'badge-admin' : 'badge-owner'}`}>
