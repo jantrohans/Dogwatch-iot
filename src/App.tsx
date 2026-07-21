@@ -557,6 +557,24 @@ function App() {
     }
   };
 
+  // Delete User by Admin
+  const handleDeleteUser = async (userId: string) => {
+    if (userId === currentUser?.id) {
+      setUserMgmtMsg('❌ Anda tidak bisa menghapus akun Anda sendiri yang sedang aktif!');
+      return;
+    }
+
+    if (confirm('Apakah Anda yakin ingin menghapus akun pengguna ini? Semua hak akses monitoring pemilik ini akan dicabut.')) {
+      const { error } = await supabase.from('users').delete().eq('id', userId);
+      if (!error) {
+        setRegisteredUsers(prev => prev.filter(u => u.id !== userId));
+        setUserMgmtMsg('✅ Akun pengguna berhasil dihapus dari database.');
+      } else {
+        setUserMgmtMsg('Gagal menghapus akun pengguna.');
+      }
+    }
+  };
+
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('dogwatch_user');
@@ -1775,11 +1793,33 @@ function App() {
                         {u.role === 'admin' ? '🏨 Admin Hotel' : '👤 Pemilik Anjing'}
                       </div>
                     </div>
-                    {u.password && (
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.05)', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
-                        🔑 {u.password}
-                      </span>
-                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      {u.password && (
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.05)', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
+                          🔑 {u.password}
+                        </span>
+                      )}
+                      {u.id !== currentUser?.id && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteUser(u.id)}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: 'var(--color-critical)',
+                            cursor: 'pointer',
+                            padding: '0.25rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            opacity: 0.7,
+                            transition: 'opacity 0.2s'
+                          }}
+                          title="Hapus Akun Pengguna"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
