@@ -17,7 +17,8 @@ import {
   Building2,
   Edit3,
   UserCheck,
-  Zap
+  Zap,
+  Users
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -38,6 +39,7 @@ interface UserType {
   username: string;
   fullName: string;
   role: UserRole;
+  password?: string;
 }
 
 type PostureType = 'standing' | 'sitting' | 'lying-side' | 'lying-chest' | 'running' | 'scratching';
@@ -125,12 +127,20 @@ function App() {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [authUsername, setAuthUsername] = useState('');
   const [authFullName, setAuthFullName] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState('');
 
   // Modals state
   const [isAddDogOpen, setIsAddDogOpen] = useState(false);
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isUserManagementOpen, setIsUserManagementOpen] = useState(false);
+
+  // Admin User Management Form inputs
+  const [newOwnerUsername, setNewOwnerUsername] = useState('');
+  const [newOwnerFullName, setNewOwnerFullName] = useState('');
+  const [newOwnerPassword, setNewOwnerPassword] = useState('');
+  const [userMgmtMsg, setUserMgmtMsg] = useState('');
 
   // Add Dog Form inputs (Admin)
   const [newDogName, setNewDogName] = useState('');
@@ -458,6 +468,10 @@ function App() {
       setAuthError('Username wajib diisi!');
       return;
     }
+    if (!authPassword.trim()) {
+      setAuthError('Password wajib diisi!');
+      return;
+    }
 
     const cleanUsername = authUsername.trim().toLowerCase();
 
@@ -465,25 +479,15 @@ function App() {
       const existing = registeredUsers.find(u => u.username.toLowerCase() === cleanUsername);
 
       if (existing) {
+        if (existing.password && existing.password !== authPassword.trim()) {
+          setAuthError('Password salah! Silakan periksa kembali password Anda.');
+          return;
+        }
         setCurrentUser(existing);
         localStorage.setItem('dogwatch_user', JSON.stringify(existing));
       } else {
-        // Auto create user with chosen role in Supabase
-        const userId = `user-${cleanUsername}`;
-        const newUser: UserType = {
-          id: userId,
-          username: cleanUsername,
-          fullName: authFullName.trim() || (authRole === 'admin' ? `Admin (${cleanUsername})` : `Pemilik (${cleanUsername})`),
-          role: authRole
-        };
-        const { error } = await supabase.from('users').insert(newUser);
-        if (!error) {
-          setRegisteredUsers(prev => [...prev, newUser]);
-          setCurrentUser(newUser);
-          localStorage.setItem('dogwatch_user', JSON.stringify(newUser));
-        } else {
-          setAuthError('Gagal membuat akun di database.');
-        }
+        setAuthError(`Akun "${cleanUsername}" tidak ditemukan. Silakan daftar akun baru.`);
+        return;
       }
     } else {
       // Register new account
@@ -498,7 +502,8 @@ function App() {
         id: userId,
         username: cleanUsername,
         fullName: authFullName.trim() || (authRole === 'admin' ? `Admin (${cleanUsername})` : `Pemilik (${cleanUsername})`),
-        role: authRole
+        role: authRole,
+        password: authPassword.trim()
       };
       const { error } = await supabase.from('users').insert(newUser);
       if (!error) {
@@ -507,10 +512,49 @@ function App() {
         localStorage.setItem('dogwatch_user', JSON.stringify(newUser));
       } else {
         setAuthError('Gagal membuat akun di database.');
+        return;
       }
     }
 
     setAuthError('');
+  };
+
+  // Create Owner User by Admin
+  const handleCreateOwnerUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setUserMgmtMsg('');
+
+    if (!newOwnerUsername.trim() || !newOwnerPassword.trim()) {
+      setUserMgmtMsg('Username dan password wajib diisi!');
+      return;
+    }
+
+    const cleanUser = newOwnerUsername.trim().toLowerCase();
+    const existing = registeredUsers.find(u => u.username.toLowerCase() === cleanUser);
+    if (existing) {
+      setUserMgmtMsg(`Username "${cleanUser}" sudah terdaftar dalam sistem.`);
+      return;
+    }
+
+    const userId = `user-${cleanUser}`;
+    const newUser: UserType = {
+      id: userId,
+      username: cleanUser,
+      fullName: newOwnerFullName.trim() || `${cleanUser} (Pemilik)`,
+      role: 'owner',
+      password: newOwnerPassword.trim()
+    };
+
+    const { error } = await supabase.from('users').insert(newUser);
+    if (!error) {
+      setRegisteredUsers(prev => [...prev, newUser]);
+      setNewOwnerUsername('');
+      setNewOwnerFullName('');
+      setNewOwnerPassword('');
+      setUserMgmtMsg(`✅ Akun pemilik "${cleanUser}" berhasil dibuat! Pemilik sekarang bisa login.`);
+    } else {
+      setUserMgmtMsg('Gagal menyimpan akun ke database.');
+    }
   };
 
   const handleLogout = () => {
@@ -746,6 +790,18 @@ function App() {
                 required
               />
             </div>
+
+            <div className="form-group">
+              <label className="form-label">Password</label>
+              <input 
+                type="password" 
+                className="form-input" 
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                placeholder="Masukkan password akun..."
+                required
+              />
+            </div>
             
             {authMode === 'register' && (
               <div className="form-group">
@@ -909,12 +965,22 @@ function App() {
               );
             })}
 
-            {/* Add Dog button (ADMIN ONLY) */}
+            {/* Add Dog button & Create Owner User button (ADMIN ONLY) */}
             {isAdmin ? (
-              <button className="btn-add-dog" onClick={() => setIsAddDogOpen(true)}>
-                <Plus size={16} />
-                <span>Tambah Anjing Baru</span>
-              </button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <button className="btn-add-dog" onClick={() => setIsAddDogOpen(true)}>
+                  <Plus size={16} />
+                  <span>Tambah Anjing Baru</span>
+                </button>
+                <button 
+                  className="btn-add-dog" 
+                  onClick={() => { setIsUserManagementOpen(true); setUserMgmtMsg(''); }}
+                  style={{ borderColor: 'rgba(161, 140, 209, 0.3)', color: 'var(--accent-purple)' }}
+                >
+                  <Users size={16} />
+                  <span>Buat Akun Pemilik (User)</span>
+                </button>
+              </div>
             ) : (
               <div style={{ padding: '0.75rem', fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', border: '1px dashed rgba(255,255,255,0.08)', borderRadius: '8px' }}>
                 🔒 Mode Pemilik: Anda hanya dapat memantau anjing yang ditugaskan oleh Dog Hotel Admin.
@@ -1613,6 +1679,117 @@ function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- USER MANAGEMENT MODAL (ADMIN ONLY) --- */}
+      {isUserManagementOpen && isAdmin && (
+        <div className="modal-overlay">
+          <div className="glass-card modal-content" style={{ maxWidth: '560px' }}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Users size={22} style={{ color: 'var(--accent-purple)' }} />
+                <h3>Kelola & Buat Akun Pemilik Anjing</h3>
+              </div>
+              <button className="modal-close-btn" onClick={() => setIsUserManagementOpen(false)}>
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* FORM CREATING NEW OWNER USER */}
+            <form onSubmit={handleCreateOwnerUser} style={{ marginBottom: '1.5rem', paddingBottom: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                Buat kredensial login (username & password) untuk Pemilik Anjing agar mereka bisa memantau anjingnya dari HP.
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Username Pemilik</label>
+                  <input 
+                    type="text" 
+                    className="form-input"
+                    value={newOwnerUsername}
+                    onChange={(e) => setNewOwnerUsername(e.target.value)}
+                    placeholder="e.g. willy"
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Password</label>
+                  <input 
+                    type="password" 
+                    className="form-input"
+                    value={newOwnerPassword}
+                    onChange={(e) => setNewOwnerPassword(e.target.value)}
+                    placeholder="Set password..."
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Nama Lengkap Pemilik</label>
+                <input 
+                  type="text" 
+                  className="form-input"
+                  value={newOwnerFullName}
+                  onChange={(e) => setNewOwnerFullName(e.target.value)}
+                  placeholder="e.g. Willy Suraya"
+                />
+              </div>
+
+              {userMgmtMsg && (
+                <div style={{ 
+                  fontSize: '0.85rem', 
+                  marginBottom: '1rem', 
+                  padding: '0.5rem 0.75rem', 
+                  borderRadius: '6px',
+                  background: userMgmtMsg.startsWith('✅') ? 'var(--color-success-bg)' : 'var(--color-critical-bg)',
+                  color: userMgmtMsg.startsWith('✅') ? 'var(--color-success)' : 'var(--color-critical)'
+                }}>
+                  {userMgmtMsg}
+                </div>
+              )}
+
+              <button type="submit" className="btn-primary" style={{ background: 'linear-gradient(135deg, var(--accent-purple), var(--accent-teal))' }}>
+                <Plus size={16} style={{ display: 'inline', marginRight: '4px' }} />
+                Buat Akun Pemilik Baru
+              </button>
+            </form>
+
+            {/* LIST OF REGISTERED USERS */}
+            <div>
+              <span style={{ fontSize: '0.9rem', fontWeight: '700', color: 'var(--text-primary)', display: 'block', marginBottom: '0.75rem' }}>
+                Daftar Pengguna Terdaftar ({registeredUsers.length})
+              </span>
+              <div style={{ maxHeight: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {registeredUsers.map(u => (
+                  <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0.75rem', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div>
+                      <div style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-primary)' }}>
+                        {u.fullName} <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>({u.username})</span>
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: u.role === 'admin' ? 'var(--accent-purple)' : 'var(--accent-cyan)' }}>
+                        {u.role === 'admin' ? '🏨 Admin Hotel' : '👤 Pemilik Anjing'}
+                      </div>
+                    </div>
+                    {u.password && (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.05)', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
+                        🔑 {u.password}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="modal-footer" style={{ marginTop: '1.25rem' }}>
+              <button type="button" className="btn-secondary" onClick={() => setIsUserManagementOpen(false)}>
+                Tutup
+              </button>
+            </div>
           </div>
         </div>
       )}
