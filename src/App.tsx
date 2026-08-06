@@ -20,12 +20,17 @@ import {
   Zap,
   Users,
   Sun,
-  Clock
+  Clock,
+  BarChart2,
+  TrendingUp
 } from 'lucide-react';
 import {
   ResponsiveContainer,
   AreaChart,
   Area,
+  BarChart,
+  Bar,
+  Legend,
   XAxis,
   YAxis,
   Tooltip,
@@ -171,6 +176,8 @@ function App() {
   // General App settings
   const [tempUnit, setTempUnit] = useState<'C' | 'F'>('C');
   const [activeTab, setActiveTab] = useState<'realtime' | 'mpu6050' | 'max30102' | 'mlx90614'>('realtime');
+  const [chartViewMode, setChartViewMode] = useState<'area' | 'bar'>('area');
+  const [barSampleCount, setBarSampleCount] = useState<number>(8);
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const stored = localStorage.getItem('dogwatch_theme');
     return stored ? stored === 'dark' : true;
@@ -1296,39 +1303,101 @@ function App() {
               
               {/* HISTORICAL CHARTS CARD */}
               <div className="glass-card chart-card">
-                <div className="chart-title-area">
-                  <span className="chart-title">Riwayat Tren Kesehatan</span>
-                  <div className="chart-controls">
-                    <button 
-                      className={`chart-tab-btn ${activeTab === 'realtime' ? 'active' : ''}`}
-                      onClick={() => setActiveTab('realtime')}
-                    >
-                      Metrik Utama
-                    </button>
-                    <button 
-                      className={`chart-tab-btn ${activeTab === 'mpu6050' ? 'active' : ''}`}
-                      onClick={() => setActiveTab('mpu6050')}
-                    >
-                      MPU6050 (Gerak)
-                    </button>
-                    <button 
-                      className={`chart-tab-btn ${activeTab === 'max30102' ? 'active' : ''}`}
-                      onClick={() => setActiveTab('max30102')}
-                    >
-                      MAX30102 (Pulsa)
-                    </button>
-                    <button 
-                      className={`chart-tab-btn ${activeTab === 'mlx90614' ? 'active' : ''}`}
-                      onClick={() => setActiveTab('mlx90614')}
-                    >
-                      MLX90614 (Suhu)
-                    </button>
+                <div className="chart-title-area" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <span className="chart-title">Riwayat Tren Kesehatan</span>
+
+                    {/* Chart Mode Switcher: Area vs Bar */}
+                    <div className="chart-mode-toggle">
+                      <button 
+                        className={`chart-mode-btn ${chartViewMode === 'area' ? 'active' : ''}`}
+                        onClick={() => setChartViewMode('area')}
+                        title="Tampilan Tren Grafik Area (Dengan Tab)"
+                      >
+                        <TrendingUp size={13} />
+                        <span>Tren (Area)</span>
+                      </button>
+                      <button 
+                        className={`chart-mode-btn ${chartViewMode === 'bar' ? 'active' : ''}`}
+                        onClick={() => setChartViewMode('bar')}
+                        title="Tampilan Grafik Balok (Semua Sensor Sekaligus)"
+                      >
+                        <BarChart2 size={13} />
+                        <span>Semua Sensor (Balok)</span>
+                      </button>
+                    </div>
                   </div>
+
+                  {chartViewMode === 'area' ? (
+                    <div className="chart-controls">
+                      <button 
+                        className={`chart-tab-btn ${activeTab === 'realtime' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('realtime')}
+                      >
+                        Metrik Utama
+                      </button>
+                      <button 
+                        className={`chart-tab-btn ${activeTab === 'mpu6050' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('mpu6050')}
+                      >
+                        MPU6050 (Gerak)
+                      </button>
+                      <button 
+                        className={`chart-tab-btn ${activeTab === 'max30102' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('max30102')}
+                      >
+                        MAX30102 (Pulsa)
+                      </button>
+                      <button 
+                        className={`chart-tab-btn ${activeTab === 'mlx90614' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('mlx90614')}
+                      >
+                        MLX90614 (Suhu)
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="chart-mode-badge" style={{ gap: '0.4rem', display: 'flex', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Tampilkan:</span>
+                      {[8, 12, 20].map(cnt => (
+                        <button
+                          key={cnt}
+                          className={`chart-tab-btn ${barSampleCount === cnt ? 'active' : ''}`}
+                          onClick={() => setBarSampleCount(cnt)}
+                          style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                        >
+                          {cnt} Data
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="chart-wrapper">
                   <ResponsiveContainer width="100%" height="100%">
-                    {activeTab === 'realtime' ? (
+                    {chartViewMode === 'bar' ? (
+                      /* GRAFIK BALOK TEBAL (ALL SENSORS AT ONCE) */
+                      <BarChart 
+                        data={activeHistory.slice(-barSampleCount).map(h => ({
+                          time: formatTime(h.timestamp),
+                          "Heart Rate (BPM)": h.max30102.heartRate,
+                          "SpO2 (%)": h.max30102.spo2,
+                          [`Suhu Tubuh (°${tempUnit})`]: tempUnit === 'F' ? parseFloat((h.mlx90614.bodyTemp * 1.8 + 32).toFixed(1)) : h.mlx90614.bodyTemp,
+                          "HRV (ms)": h.max30102.hrv
+                        }))}
+                        barGap={3}
+                        barCategoryGap="18%"
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                        <XAxis dataKey="time" stroke="var(--text-muted)" fontSize={10} />
+                        <YAxis stroke="var(--text-muted)" fontSize={10} />
+                        <Tooltip contentStyle={{ background: '#141A26', borderColor: 'rgba(255,255,255,0.1)', color: '#fff', borderRadius: '8px' }} />
+                        <Legend wrapperStyle={{ paddingTop: '8px', fontSize: '11px' }} />
+                        <Bar dataKey="Heart Rate (BPM)" fill="var(--color-critical)" radius={[4, 4, 0, 0]} maxBarSize={22} />
+                        <Bar dataKey="SpO2 (%)" fill="var(--accent-cyan)" radius={[4, 4, 0, 0]} maxBarSize={22} />
+                        <Bar dataKey={`Suhu Tubuh (°${tempUnit})`} fill="var(--color-warning)" radius={[4, 4, 0, 0]} maxBarSize={22} />
+                        <Bar dataKey="HRV (ms)" fill="var(--accent-purple)" radius={[4, 4, 0, 0]} maxBarSize={22} />
+                      </BarChart>
+                    ) : activeTab === 'realtime' ? (
                       <AreaChart data={activeHistory.map(h => ({
                         time: formatTime(h.timestamp),
                         heartRate: h.max30102.heartRate,
