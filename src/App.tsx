@@ -18,7 +18,9 @@ import {
   Edit3,
   UserCheck,
   Zap,
-  Users
+  Users,
+  Sun,
+  Clock
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -169,6 +171,36 @@ function App() {
   // General App settings
   const [tempUnit, setTempUnit] = useState<'C' | 'F'>('C');
   const [activeTab, setActiveTab] = useState<'realtime' | 'mpu6050' | 'max30102' | 'mlx90614'>('realtime');
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    const stored = localStorage.getItem('dogwatch_theme');
+    return stored ? stored === 'dark' : true;
+  });
+  const [historyDays, setHistoryDays] = useState<1 | 3 | 7>(1);
+  const [historyData, setHistoryData] = useState<any[]>([]);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', isDarkMode ? 'dark' : 'light');
+    localStorage.setItem('dogwatch_theme', isDarkMode ? 'dark' : 'light');
+  }, [isDarkMode]);
+
+  // Fetch history data from Supabase
+  const fetchHistory = async (days: number) => {
+    if (!activeDog) return;
+    setIsHistoryLoading(true);
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const { data } = await supabase
+      .from('telemetry')
+      .select('*')
+      .eq('dog_id', activeDog.id)
+      .gte('created_at', since.toISOString())
+      .order('created_at', { ascending: false })
+      .limit(500);
+    setHistoryData(data || []);
+    setIsHistoryLoading(false);
+  };
 
   // --- ROLE BASED DOG FILTERING ---
   const isAdmin = currentUser?.role === 'admin';
@@ -184,6 +216,13 @@ function App() {
 
   // Current active selected dog object
   const activeDog = userDogs.find(d => d.id === selectedDogId) || userDogs[0];
+
+  // Fetch history when active dog or timeframe changes
+  useEffect(() => {
+    if (activeDog?.id) {
+      fetchHistory(historyDays);
+    }
+  }, [activeDog?.id, historyDays]);
 
   // --- SUPABASE DATA FETCHING & REALTIME ---
   useEffect(() => {
@@ -905,6 +944,9 @@ function App() {
               {isAdmin ? '🏨 Admin:' : '👤 Pemilik:'} <strong>{currentUser.fullName}</strong>
             </span>
           </div>
+          <button className="theme-toggle-btn" onClick={() => setIsDarkMode(!isDarkMode)} title={isDarkMode ? 'Mode Terang' : 'Mode Gelap'}>
+            {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
           <button className="logout-btn" onClick={handleLogout}>
             <LogOut size={16} />
             <span>Keluar</span>
@@ -1417,6 +1459,62 @@ function App() {
                 </div>
               </div>
             </section>
+
+            {/* HEALTH HISTORY TABLE */}
+            <div className="glass-card chart-card">
+              <div className="chart-title-area">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Clock size={18} style={{ color: 'var(--accent-teal)' }} />
+                  <span className="chart-title">Riwayat Kesehatan {activeDog?.name}</span>
+                </div>
+                <div className="history-filter-bar">
+                  {([1, 3, 7] as const).map(d => (
+                    <button
+                      key={d}
+                      className={`history-filter-btn ${historyDays === d ? 'active' : ''}`}
+                      onClick={() => setHistoryDays(d)}
+                    >
+                      {d} Hari
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="history-table-container">
+                {isHistoryLoading ? (
+                  <div className="empty-alerts">Memuat data riwayat...</div>
+                ) : historyData.length === 0 ? (
+                  <div className="empty-alerts">
+                    <Clock size={24} />
+                    <span>Belum ada data riwayat dalam {historyDays} hari terakhir</span>
+                  </div>
+                ) : (
+                  <table className="history-table">
+                    <thead>
+                      <tr>
+                        <th>Waktu</th>
+                        <th>❤️ BPM</th>
+                        <th>🫁 SpO2</th>
+                        <th>🌡️ Suhu</th>
+                        <th>🏃 Aktivitas</th>
+                        <th>👣 Postur</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {historyData.map((row: any, i: number) => (
+                        <tr key={i}>
+                          <td>{new Date(row.created_at).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+                          <td style={{ color: row.heart_rate > 140 || row.heart_rate < 60 ? 'var(--color-critical)' : 'var(--text-primary)' }}>{row.heart_rate || '-'}</td>
+                          <td>{row.spo2 || '-'}%</td>
+                          <td style={{ color: row.body_temp > 39.5 ? 'var(--color-critical)' : row.body_temp > 39.0 ? 'var(--color-warning)' : 'var(--text-primary)' }}>{row.body_temp?.toFixed(1) || '-'}°C</td>
+                          <td>{row.activity_state || '-'}</td>
+                          <td>{row.posture || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
             
           </main>
         ) : (

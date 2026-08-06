@@ -1,7 +1,8 @@
 #include <Wire.h>
 #include <WiFi.h>
+#include <WiFiMulti.h>
 #include <HTTPClient.h>
-#include <ArduinoJson.h>      // Library "ArduinoJson" oleh Benoit Blanchon (Instal via Library Manager)
+#include <ArduinoJson.h>
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_MLX90614.h>
@@ -9,14 +10,21 @@
 #include "heartRate.h"
 
 // ================= KONFIGURASI WIFI & SUPABASE =================
-const char* ssid = "NAMA_WIFI_ANDA";                // Ganti dengan Nama WiFi Anda
-const char* password = "PASSWORD_WIFI_ANDA";        // Ganti dengan Password WiFi Anda
+WiFiMulti wifiMulti;
+
+const char* ssid_1 = "WIFI_UTAMA";                // Ganti dengan Nama WiFi Utama
+const char* password_1 = "PASSWORD_UTAMA";        // Ganti dengan Password Utama
+
+const char* ssid_2 = "WIFI_CADANGAN_1";           // Ganti dengan WiFi Cadangan 1
+const char* password_2 = "PASSWORD_CADANGAN_1";
+
+const char* ssid_3 = "WIFI_CADANGAN_2";           // Ganti dengan WiFi Cadangan 2
+const char* password_3 = "PASSWORD_CADANGAN_2";
 
 const char* supabaseUrl = "https://uvkqbzwonjqiigfvwobx.supabase.co/rest/v1/telemetry";
 const char* supabaseApiKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV2a3FiendvbmpxaWlnZnZ3b2J4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2MTExNjUsImV4cCI6MjEwMDE4NzE2NX0.3z1wGD61RgEsSeLJRixAHP1taCh4PM96G5nL-QjSPlY";
 
-// ID Anjing dari dashboard admin (contoh: "dog-luna-xxxx")
-// Ganti dengan ID anjing yang sebenarnya, contoh: "dog-melody-1784628050889"
+// ID Anjing dari dashboard admin
 const char* dogId = "GANTI_DENGAN_ID_ANJING_DARI_DASHBOARD"; 
 
 // ================= INSTANSI SENSOR & VARIABEL =================
@@ -24,7 +32,7 @@ Adafruit_MPU6050 mpu;
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 MAX30105 particleSensor;
 
-// Variabel MAX30102
+// ================= Variabel MAX30102 =================
 long lastBeat = 0;
 float beatsPerMinute;
 int beatAvg = 0;
@@ -32,24 +40,43 @@ const byte RATE_SIZE = 4;
 byte rates[RATE_SIZE];
 byte rateSpot = 0;
 
-// Non-blocking timer untuk pengiriman telemetri (kirim setiap 5 detik)
+// Batas ambang kontak jari/kulit. 
+const long IR_KONTAK_MINIMUM = 50000;
+
+// Rentang BPM valid untuk ANJING (bukan manusia).
+const float BPM_MIN_VALID = 40.0;
+const float BPM_MAX_VALID = 220.0;
+
+// Refractory period: jarak minimum antar detak (mencegah double-trigger)
+const long MIN_JEDA_DETAK_MS = 300;
+
+// ================= Variabel Filter Gerakan =================
+float accelBaseline = 9.8; // percepatan gravitasi saat diam (m/s^2)
+const float AMBANG_GERAK = 2.0; // deviasi dari baseline dianggap "bergerak"
+
+// ================= Variabel Estimasi Fallback =================
+const float SUHU_NORMAL_ANJING = 38.5; // celcius, acuan suhu tubuh normal anjing
+const float BPM_ISTIRAHAT_DASAR = 90.0; // titik awal estimasi saat diam & suhu normal
+
+// Timer untuk telemetri dan langkah
 unsigned long lastSendTime = 0;
 const unsigned long sendInterval = 5000; 
-
-// Akumulasi langkah / aktivitas (estimasi gerakan sederhana)
 int stepsCount = 1200;
 unsigned long stepTimer = 0;
 
 void setup() {
   Serial.begin(115200);
   
-  // 1. Inisialisasi I2C secara manual
+  // ================= OPTIMASI BATERAI =================
+  // Turunkan kecepatan CPU dari 240MHz ke 80MHz 
+  setCpuFrequencyMhz(80);
+  // ====================================================
+
   Wire.begin(21, 22);
-  Wire.setClock(100000); // Set ke 100kHz agar MAX30102 stabil
+  Wire.setClock(100000); 
   
   Serial.println("\n--- Memulai Inisialisasi Sensor ---");
 
-  // 2. Inisialisasi MPU6050
   if (!mpu.begin()) {
     Serial.println("[-] MPU6050 Gagal!");
   } else {
@@ -57,7 +84,6 @@ void setup() {
   }
   delay(100);
 
-  // 3. Inisialisasi MLX90614
   if (!mlx.begin()) {
     Serial.println("[-] MLX90614 Gagal!");
   } else {
@@ -65,97 +91,150 @@ void setup() {
   }
   delay(100);
 
-  // 4. Inisialisasi MAX30102
   if (!particleSensor.begin(Wire, I2C_SPEED_STANDARD)) {
     Serial.println("[-] MAX30102 Gagal! Periksa kabel.");
   } else {
     Serial.println("[+] MAX30102 OK!");
-    
-    // Konfigurasi default library
-    particleSensor.setup(); 
-    particleSensor.setPulseAmplitudeRed(0x0A);   // LED merah rendah (indikator)
-    particleSensor.setPulseAmplitudeIR(0xC0);    // LED IR tinggi (pembacaan utama)
+    byte ledBrightness = 60;
+    byte sampleAverage = 4;
+    byte ledMode = 2;
+    int sampleRate = 100;
+    int pulseWidth = 411;
+    int adcRange = 4096;
+    particleSensor.setup(ledBrightness, sampleAverage, ledMode, sampleRate, pulseWidth, adcRange);
   }
 
-  // 5. Hubungkan ke WiFi
-  WiFi.begin(ssid, password);
-  Serial.print("[WiFi] Menghubungkan ke jaringan...");
-  while (WiFi.status() != WL_CONNECTED) {
+  // Hubungkan ke WiFi Multi (Mencari sinyal terkuat dari 3 jaringan)
+  wifiMulti.addAP(ssid_1, password_1);
+  wifiMulti.addAP(ssid_2, password_2);
+  wifiMulti.addAP(ssid_3, password_3);
+
+  Serial.print("[WiFi] Menghubungkan ke jaringan yang tersedia...");
+  while (wifiMulti.run() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\n[WiFi] Terhubung!");
+  Serial.print("\n[WiFi] Terhubung ke: ");
+  Serial.println(WiFi.SSID());
   Serial.print("[WiFi] IP Address: ");
   Serial.println(WiFi.localIP());
+
+  // ================= OPTIMASI BATERAI =================
+  // Aktifkan Modem Sleep (Mematikan antena WiFi saat tidak ada pengiriman data)
+  WiFi.setSleep(true);
+  // ====================================================
 
   Serial.println("--- Sistem Siap ---\n");
 }
 
-void loop() {
-  // --- A. BACA MPU6050 (Akselerometer & Gyroskop) ---
-  sensors_event_t a, g, temp_mpu;
-  mpu.getEvent(&a, &g, &temp_mpu);
+// Menghitung magnitudo percepatan total dari 3 sumbu.
+float hitungMagnitudoAkselerasi(sensors_event_t &a) {
+  float x = a.acceleration.x;
+  float y = a.acceleration.y;
+  float z = a.acceleration.z;
+  return sqrt(x * x + y * y + z * z);
+}
 
-  // --- B. BACA MLX90614 (Suhu Tubuh & Sekitar) ---
-  float suhuTubuh = mlx.readObjectTempC();
-  float suhuSekitar = mlx.readAmbientTempC();
+// Estimasi kasar detak jantung berdasarkan suhu tubuh & tingkat gerak
+int estimasiBPMFallback(float suhuObjek, float magnitudoGerak) {
+  float estimasi = BPM_ISTIRAHAT_DASAR;
 
-  // --- C. BACA MAX30102 (IR & BPM) ---
-  long irValue = particleSensor.getIR();
-  
-  if (checkForBeat(irValue) == true) {
-    long delta = millis() - lastBeat;
-    lastBeat = millis();
-    beatsPerMinute = 60 / (delta / 1000.0);
-
-    if (beatsPerMinute < 255 && beatsPerMinute > 20) {
-      rates[rateSpot++] = (byte)beatsPerMinute;
-      rateSpot %= RATE_SIZE;
-      beatAvg = 0;
-      for (byte x = 0 ; x < RATE_SIZE ; x++) beatAvg += rates[x];
-      beatAvg /= RATE_SIZE;
-    }
+  if (!isnan(suhuObjek) && suhuObjek > 20.0) { // Validasi suhu masuk akal
+    float deltaSuhu = suhuObjek - SUHU_NORMAL_ANJING;
+    estimasi += deltaSuhu * 10.0;
   }
 
-  // Hitung Magnitude Akselerasi (G-Force)
-  float accelMag = sqrt(a.acceleration.x * a.acceleration.x + 
-                        a.acceleration.y * a.acceleration.y + 
-                        a.acceleration.z * a.acceleration.z) / 9.81;
-                        
-  // Estimasi langkah sederhana jika gerakan guncangan cukup besar (Magnitude > 1.3G)
-  if (accelMag > 1.3 && millis() - stepTimer > 400) {
+  float deviasiGerak = magnitudoGerak - accelBaseline;
+  if (deviasiGerak > 0) {
+    estimasi += deviasiGerak * 5.0;
+  }
+
+  if (estimasi < BPM_MIN_VALID) estimasi = BPM_MIN_VALID;
+  if (estimasi > BPM_MAX_VALID) estimasi = BPM_MAX_VALID;
+
+  return (int)estimasi;
+}
+
+void loop() {
+  // --- A. BACA MPU6050 ---
+  sensors_event_t a, g, temp_mpu;
+  mpu.getEvent(&a, &g, &temp_mpu);
+  
+  float accelMagnitude = hitungMagnitudoAkselerasi(a);
+  bool sedangBergerakBanyak = fabs(accelMagnitude - accelBaseline) > AMBANG_GERAK;
+  float accelG = accelMagnitude / 9.81; // G-Force untuk dashboard
+  
+  // Hitung langkah sederhana
+  if (accelG > 1.3 && millis() - stepTimer > 400) {
     stepsCount++;
     stepTimer = millis();
   }
 
-  // --- D. KIRIM DATA KE SUPABASE (Non-blocking setiap 5 detik) ---
+  // --- B. BACA MLX90614 ---
+  float suhuTubuh = mlx.readObjectTempC();
+  float suhuSekitar = mlx.readAmbientTempC();
+
+  // --- C. BACA MAX30102 ---
+  long irValue = particleSensor.getIR();
+  bool kontakTerdeteksi = irValue > IR_KONTAK_MINIMUM;
+  bool bpmValidDariSensor = false;
+
+  if (kontakTerdeteksi && !sedangBergerakBanyak) {
+    if (checkForBeat(irValue) == true) {
+      long delta = millis() - lastBeat;
+
+      // Tolak detak yang terlalu rapat (noise)
+      if (delta > MIN_JEDA_DETAK_MS) {
+        lastBeat = millis();
+        beatsPerMinute = 60.0 / (delta / 1000.0);
+
+        if (beatsPerMinute >= BPM_MIN_VALID && beatsPerMinute <= BPM_MAX_VALID) {
+          rates[rateSpot++] = (byte)beatsPerMinute;
+          rateSpot %= RATE_SIZE;
+          beatAvg = 0;
+          for (byte x = 0; x < RATE_SIZE; x++) beatAvg += rates[x];
+          beatAvg /= RATE_SIZE;
+          bpmValidDariSensor = true;
+        }
+      }
+    } else if (beatAvg > 0) {
+      bpmValidDariSensor = true;
+    }
+  }
+
+  // --- D. KIRIM DATA KE SUPABASE (Setiap 5 detik) ---
   if (millis() - lastSendTime >= sendInterval) {
     lastSendTime = millis();
 
-    // Tampilkan log pembacaan sensor lokal di Serial Monitor
-    Serial.println("\n=== TELEMETRI BARU ===");
-    Serial.print("Suhu Tubuh: "); Serial.print(suhuTubuh); Serial.println(" C");
-    Serial.print("Akselerasi Z: "); Serial.print(a.acceleration.z); Serial.println(" m/s^2");
+    Serial.print("Gerak:"); Serial.print(sedangBergerakBanyak ? "TINGGI" : "normal");
+    Serial.print(" | Suhu:"); Serial.print(isnan(suhuTubuh) ? "ERR" : String(suhuTubuh, 1));
     
-    if (irValue < 50000) {
-      Serial.println("MAX30102: Sensor dilepas dari kulit (Menggunakan Estimasi BPM)");
-      beatAvg = 0; // Reset ke 0 jika dilepas
+    if (!kontakTerdeteksi) {
+      Serial.print(" | MAX: lepas");
+    } else if (sedangBergerakBanyak) {
+      Serial.print(" | MAX: gerak tinggi");
     } else {
-      Serial.print("IR: "); Serial.print(irValue);
-      Serial.print(" | BPM Asli: "); Serial.println(beatAvg);
+      Serial.print(" | IR:"); Serial.print(irValue);
     }
 
-    // Kirim data jika terhubung ke WiFi
-    if (WiFi.status() == WL_CONNECTED) {
+    int finalBPM = 0;
+    if (bpmValidDariSensor && beatAvg > 0) {
+      finalBPM = beatAvg;
+      Serial.print(" | BPM(Sensor):"); Serial.println(finalBPM);
+    } else {
+      finalBPM = estimasiBPMFallback(suhuTubuh, accelMagnitude);
+      Serial.print(" | BPM(Estimasi):"); Serial.println(finalBPM);
+    }
+
+    // Kirim HTTP POST ke Database Supabase
+    if (wifiMulti.run() == WL_CONNECTED) {
       HTTPClient http;
       http.begin(supabaseUrl);
       
-      // Setup Headers
       http.addHeader("Content-Type", "application/json");
       http.addHeader("apikey", supabaseApiKey);
       http.addHeader("Authorization", String("Bearer ") + supabaseApiKey);
 
-      // Siapkan payload JSON telemetri
       StaticJsonDocument<500> doc;
       doc["dog_id"] = dogId;
       doc["accel_x"] = a.acceleration.x;
@@ -165,68 +244,39 @@ void loop() {
       doc["gyro_y"] = g.gyro.y;
       doc["gyro_z"] = g.gyro.z;
       doc["steps"] = stepsCount;
-      doc["active_minutes"] = stepsCount / 120; // Estimasi kasar menit aktif
+      doc["active_minutes"] = stepsCount / 120; 
       
-      // Klasifikasi Postur berdasarkan sudut gravitasi
       if (a.acceleration.z > 7.5) doc["posture"] = "standing";
       else if (a.acceleration.y > 6.0) doc["posture"] = "sitting";
       else doc["posture"] = "lying-side";
 
-      // Klasifikasi Aktivitas
-      if (accelMag > 1.5) doc["activity_state"] = "running";
-      else if (accelMag > 1.1) doc["activity_state"] = "walking";
+      if (accelG > 1.5) doc["activity_state"] = "running";
+      else if (accelG > 1.1) doc["activity_state"] = "walking";
       else doc["activity_state"] = "resting";
 
-      // --- PENDEKATAN 2: ESTIMASI BPM ---
-      if (irValue > 50000 && beatAvg > 0) {
-        // Gunakan data sensor asli jika terbaca dengan baik
-        doc["heart_rate"] = beatAvg;
-        doc["spo2"] = random(97, 100);
-        doc["hrv"] = random(40, 60);
-      } else {
-        // Fallback: Estimasi BPM dari tingkat aktivitas MPU6050
-        int estimatedBPM;
-        if (accelMag > 1.5) {
-          estimatedBPM = random(120, 145);      // Sedang berlari/sangat aktif
-        } else if (accelMag > 1.1) {
-          estimatedBPM = random(95, 115);       // Sedang berjalan
-        } else {
-          estimatedBPM = random(75, 95);        // Sedang istirahat/diam
-        }
-        
-        doc["heart_rate"] = estimatedBPM;
-        doc["spo2"] = random(96, 100); // Asumsi sehat
-        doc["hrv"] = random(42, 58);
-        
-        Serial.print("BPM Estimasi: "); Serial.println(estimatedBPM);
-      }
-
-      // Data MLX90614
+      doc["heart_rate"] = finalBPM;
+      doc["spo2"] = random(96, 100); 
+      doc["hrv"] = random(42, 58);
+      
       doc["body_temp"] = isnan(suhuTubuh) ? 0.0 : suhuTubuh;
       doc["ambient_temp"] = isnan(suhuSekitar) ? 0.0 : suhuSekitar;
 
       String jsonString;
       serializeJson(doc, jsonString);
 
-      // Kirim POST HTTP ke Supabase
       int httpResponseCode = http.POST(jsonString);
-      
       if (httpResponseCode > 0) {
-        Serial.print("[Supabase] Pengiriman Sukses! Response Code: ");
-        Serial.println(httpResponseCode);
+        Serial.println("[Supabase] Data terkirim!");
       } else {
-        Serial.print("[Supabase] Pengiriman gagal, Error: ");
+        Serial.print("[Supabase] Error: ");
         Serial.println(http.errorToString(httpResponseCode).c_str());
       }
-      
       http.end();
     } else {
-      Serial.println("[WiFi] Terputus! Mencoba menyambungkan kembali...");
-      WiFi.disconnect();
-      WiFi.begin(ssid, password);
+      Serial.println("[WiFi] Semua jaringan terputus! Sedang memindai ulang WiFi...");
     }
   }
 
-  // Delay 2 milidetik agar sampling MAX30102 tetap cepat untuk deteksi denyut
+  // Delay minimal 2ms untuk sampling cepat detak jantung
   delay(2); 
 }

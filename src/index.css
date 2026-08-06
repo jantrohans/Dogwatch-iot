@@ -39,6 +39,74 @@
   --glass-border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+/* Light Mode Theme */
+[data-theme="light"] {
+  --bg-main: #F0F2F5;
+  --bg-card: rgba(255, 255, 255, 0.85);
+  --bg-card-hover: rgba(255, 255, 255, 0.95);
+  --border-color: rgba(0, 0, 0, 0.08);
+  --border-color-glow: rgba(79, 172, 254, 0.3);
+  --accent-cyan: #0891B2;
+  --accent-teal: #2563EB;
+  --accent-orange: #EA580C;
+  --accent-orange-glow: rgba(234, 88, 12, 0.15);
+  --accent-purple: #7C3AED;
+  --color-success: #059669;
+  --color-success-bg: rgba(5, 150, 105, 0.08);
+  --color-warning: #D97706;
+  --color-warning-bg: rgba(217, 119, 6, 0.08);
+  --color-critical: #DC2626;
+  --color-critical-bg: rgba(220, 38, 38, 0.08);
+  --color-critical-glow: rgba(220, 38, 38, 0.2);
+  --text-primary: #111827;
+  --text-secondary: #4B5563;
+  --text-muted: #9CA3AF;
+  --glass-shadow: 0 4px 16px 0 rgba(0, 0, 0, 0.06);
+  --glass-border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] body {
+  background-image:
+    radial-gradient(at 0% 0%, rgba(79, 172, 254, 0.06) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(234, 88, 12, 0.04) 0px, transparent 50%),
+    radial-gradient(at 50% 50%, rgba(8, 145, 178, 0.03) 0px, transparent 50%);
+}
+
+[data-theme="light"] .app-header {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+[data-theme="light"] ::-webkit-scrollbar-track { background: #F0F2F5; }
+[data-theme="light"] ::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.12); }
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.2); }
+
+[data-theme="light"] .form-input {
+  background: rgba(0, 0, 0, 0.02);
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="light"] .form-input:focus {
+  background: #fff;
+  border-color: var(--accent-teal);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+}
+
+[data-theme="light"] .sim-select {
+  background: #fff;
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="light"] .slider-input { background: rgba(0, 0, 0, 0.08); }
+[data-theme="light"] .btn-primary { color: #fff; }
+
+[data-theme="light"] .logo-text {
+  -webkit-text-fill-color: transparent;
+  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-teal));
+  -webkit-background-clip: text;
+}
+
+[data-theme="light"] .modal-overlay { background: rgba(0, 0, 0, 0.4); }
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -1248,4 +1316,90 @@ body {
   .logout-btn {
     padding: 0.5rem;
   }
+}
+
+/* Theme Toggle Button */
+.theme-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: var(--glass-border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.theme-toggle-btn:hover {
+  color: var(--accent-cyan);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* History Table */
+.history-table-container {
+  overflow-x: auto;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.history-table th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-card);
+  padding: 0.75rem 0.5rem;
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+  white-space: nowrap;
+}
+
+.history-table td {
+  padding: 0.6rem 0.5rem;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.history-table tr:hover td {
+  background: var(--bg-card-hover);
+}
+
+.history-filter-bar {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.history-filter-btn {
+  padding: 0.4rem 0.85rem;
+  border-radius: 6px;
+  border: var(--glass-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.history-filter-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.history-filter-btn.active {
+  background: var(--accent-teal);
+  color: #fff;
+  font-weight: 600;
+  border-color: var(--accent-teal);
 }
