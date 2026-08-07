@@ -67,6 +67,7 @@ interface Dog {
   breed: string;
   age: number;
   weight: number;
+  size?: 'kecil' | 'sedang' | 'besar';
   ownerId: string;
   ownerName?: string;
   settings: DogSettings;
@@ -156,6 +157,7 @@ function App() {
   const [newDogBreed, setNewDogBreed] = useState('');
   const [newDogAge, setNewDogAge] = useState('');
   const [newDogWeight, setNewDogWeight] = useState('');
+  const [newDogSize, setNewDogSize] = useState<'kecil' | 'sedang' | 'besar'>('sedang');
   const [newDogOwnerUsername, setNewDogOwnerUsername] = useState('willy');
 
   // Edit Dog Profile Form inputs (Admin)
@@ -164,6 +166,7 @@ function App() {
   const [editDogBreed, setEditDogBreed] = useState('');
   const [editDogAge, setEditDogAge] = useState('');
   const [editDogWeight, setEditDogWeight] = useState('');
+  const [editDogSize, setEditDogSize] = useState<'kecil' | 'sedang' | 'besar'>('sedang');
   const [editDogOwnerUsername, setEditDogOwnerUsername] = useState('');
 
   // Settings Edit inputs (Thresholds)
@@ -712,6 +715,7 @@ function App() {
       breed: newDogBreed.trim(),
       age: parseFloat(newDogAge),
       weight: parseFloat(newDogWeight),
+      size: newDogSize,
       ownerId: targetOwnerId,
       ownerName: cleanOwner
     };
@@ -741,6 +745,7 @@ function App() {
       setNewDogBreed('');
       setNewDogAge('');
       setNewDogWeight('');
+      setNewDogSize('sedang');
       setNewDogOwnerUsername('willy');
       setIsAddDogOpen(false);
     }
@@ -753,6 +758,7 @@ function App() {
     setEditDogBreed(dogToEdit.breed);
     setEditDogAge(dogToEdit.age.toString());
     setEditDogWeight(dogToEdit.weight.toString());
+    setEditDogSize(dogToEdit.size || 'sedang');
     setEditDogOwnerUsername(dogToEdit.ownerName || dogToEdit.ownerId.replace('user-', ''));
     setIsEditProfileOpen(true);
   };
@@ -784,6 +790,7 @@ function App() {
       breed: editDogBreed.trim(),
       age: parseFloat(editDogAge),
       weight: parseFloat(editDogWeight),
+      size: editDogSize,
       ownerId: targetOwnerId,
       ownerName: cleanOwner
     };
@@ -1031,6 +1038,25 @@ function App() {
               {userDogs.length} Ekor
             </span>
           </div>
+          {isAdmin && (
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', padding: '0.6rem 0.75rem 0.5rem', borderBottom: '1px solid var(--border-color)' }}>
+              {(['kecil', 'sedang', 'besar'] as const).map(sz => {
+                const count = userDogs.filter(d => (d.size || 'sedang') === sz).length;
+                const label = sz === 'kecil' ? '🐩 Kecil' : sz === 'sedang' ? '🐕 Sedang' : '🦮 Besar';
+                const color = sz === 'kecil' ? 'var(--accent-purple)' : sz === 'sedang' ? 'var(--accent-cyan)' : 'var(--accent-orange)';
+                return (
+                  <div key={sz} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', padding: '0.25rem 0.6rem', borderRadius: '6px', background: `${color}18`, border: `1px solid ${color}30`, fontSize: '0.85rem', color }}>
+                    <span>{label}</span>
+                    <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>{count}</span>
+                  </div>
+                );
+              })}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', padding: '0.25rem 0.6rem', borderRadius: '6px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-color)', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                <span>Total</span>
+                <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>{userDogs.length}</span>
+              </div>
+            </div>
+          )}
           
           <div className="dog-list">
             {userDogs.map(d => {
@@ -1830,6 +1856,21 @@ function App() {
                 </div>
               </div>
 
+              {/* Dog Size Dropdown */}
+              <div className="form-group">
+                <label className="form-label">Ukuran Anjing</label>
+                <select
+                  className="sim-select"
+                  style={{ width: '100%', padding: '0.65rem 0.85rem', borderRadius: '8px', fontSize: '0.9rem' }}
+                  value={newDogSize}
+                  onChange={(e) => setNewDogSize(e.target.value as 'kecil' | 'sedang' | 'besar')}
+                >
+                  <option value="kecil">🐩 Kecil (contoh: Chihuahua, Toy Poodle)</option>
+                  <option value="sedang">🐕 Sedang (contoh: Shih Tzu, Beagle)</option>
+                  <option value="besar">🦮 Besar (contoh: Golden Retriever, Husky)</option>
+                </select>
+              </div>
+
               {/* Assign Owner Username */}
               <div className="form-group">
                 <label className="form-label">Username Pemilik Anjing (Akses User)</label>
@@ -1917,6 +1958,21 @@ function App() {
                     required
                   />
                 </div>
+              </div>
+
+              {/* Dog Size Dropdown */}
+              <div className="form-group">
+                <label className="form-label">Ukuran Anjing</label>
+                <select
+                  className="sim-select"
+                  style={{ width: '100%', padding: '0.65rem 0.85rem', borderRadius: '8px', fontSize: '0.9rem' }}
+                  value={editDogSize}
+                  onChange={(e) => setEditDogSize(e.target.value as 'kecil' | 'sedang' | 'besar')}
+                >
+                  <option value="kecil">🐩 Kecil (contoh: Chihuahua, Toy Poodle)</option>
+                  <option value="sedang">🐕 Sedang (contoh: Shih Tzu, Beagle)</option>
+                  <option value="besar">🦮 Besar (contoh: Golden Retriever, Husky)</option>
+                </select>
               </div>
 
               <div className="form-group">
