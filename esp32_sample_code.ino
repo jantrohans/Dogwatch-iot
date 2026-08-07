@@ -12,14 +12,14 @@
 // ================= KONFIGURASI WIFI & SUPABASE =================
 WiFiMulti wifiMulti;
 
-const char* ssid_1 = "WIFI_UTAMA";                // Ganti dengan Nama WiFi Utama
-const char* password_1 = "PASSWORD_UTAMA";        // Ganti dengan Password Utama
+const char* ssid_1 = "devende";               
+const char* password_1 = "********";       // Ganti dengan Password WiFi devende
 
-const char* ssid_2 = "WIFI_CADANGAN_1";           // Ganti dengan WiFi Cadangan 1
-const char* password_2 = "PASSWORD_CADANGAN_1";
+const char* ssid_2 = "Dogs Ministry";           
+const char* password_2 = "jajanduludong";
 
-const char* ssid_3 = "WIFI_CADANGAN_2";           // Ganti dengan WiFi Cadangan 2
-const char* password_3 = "PASSWORD_CADANGAN_2";
+const char* ssid_3 = "M2G";           
+const char* password_3 = "Customer1234";
 
 // ================= KONFIGURASI SUPABASE REST API =================
 const char* supabaseUrl = "https://uvkqbzwonjqiigfvwobx.supabase.co/rest/v1/telemetry";
