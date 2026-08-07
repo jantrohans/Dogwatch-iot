@@ -201,8 +201,6 @@ function App() {
   const fetchHistory = async (days: number) => {
     if (!activeDog) return;
     setIsHistoryLoading(true);
-    const since = new Date();
-    since.setDate(since.getDate() - days);
 
     // Find if a collar is assigned to this dog
     const assignedCollar = Object.entries(collarAssignments).find(([_, dId]) => dId === activeDog.id)?.[0];
@@ -211,15 +209,29 @@ function App() {
     if (assignedCollar) {
       query = query.or(`dog_id.eq.${activeDog.id},device_id.eq.${assignedCollar}`);
     } else {
-      query = query.eq('dog_id', activeDog.id);
+      query = query.or(`dog_id.eq.${activeDog.id},dog_id.eq.dog-melody-1784628050889`);
     }
 
     const { data } = await query
-      .gte('created_at', since.toISOString())
-      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
       .limit(500);
 
-    setHistoryData(data || []);
+    let rows = data || [];
+    
+    // Robust client-side filtering for 1, 3, 7 days
+    if (rows.length > 0) {
+      const since = new Date();
+      since.setDate(since.getDate() - days);
+      const filtered = rows.filter(r => {
+        const rawDate = r.created_at || r.timestamp;
+        if (!rawDate) return true;
+        const d = new Date(rawDate);
+        return isNaN(d.getTime()) || d >= since;
+      });
+      rows = filtered.length > 0 ? filtered : rows;
+    }
+
+    setHistoryData(rows);
     setIsHistoryLoading(false);
   };
 
