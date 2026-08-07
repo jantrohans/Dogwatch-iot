@@ -209,7 +209,7 @@ function App() {
     if (assignedCollar) {
       query = query.or(`dog_id.eq.${activeDog.id},device_id.eq.${assignedCollar}`);
     } else {
-      query = query.or(`dog_id.eq.${activeDog.id},dog_id.eq.dog-melody-1784628050889`);
+      query = query.eq('dog_id', activeDog.id);
     }
 
     const { data } = await query
