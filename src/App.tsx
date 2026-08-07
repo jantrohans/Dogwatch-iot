@@ -218,6 +218,14 @@ function App() {
 
     let rows = data || [];
     
+    // Ensure telemetry rows belong strictly to activeDog based on online collar assignment
+    rows = rows.filter(r => {
+      if (r.device_id && collarAssignments[r.device_id]) {
+        return collarAssignments[r.device_id] === activeDog.id;
+      }
+      return r.dog_id === activeDog.id;
+    });
+
     // Robust client-side filtering for 1, 3, 7 days
     if (rows.length > 0) {
       const since = new Date();
@@ -355,13 +363,13 @@ function App() {
         (payload) => {
           const row = payload.new;
           
-          const assignedCollar = Object.entries(collarAssignments).find(([_, dId]) => dId === activeDog.id)?.[0];
-          const isTargetDog = 
-            row.dog_id === activeDog.id || 
-            (assignedCollar && row.device_id === assignedCollar) ||
-            (row.device_id && collarAssignments[row.device_id] === activeDog.id);
+          // Online dashboard collar assignment takes 100% precedence over hardcoded ESP32 strings!
+          let targetDogId = row.dog_id;
+          if (row.device_id && collarAssignments[row.device_id]) {
+            targetDogId = collarAssignments[row.device_id];
+          }
 
-          if (!isTargetDog) return;
+          if (targetDogId !== activeDog.id) return;
 
           const newTelemetry: TelemetryData = {
             dogId: activeDog.id,
