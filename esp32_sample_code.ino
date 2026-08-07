@@ -273,9 +273,11 @@ void loop() {
       serializeJson(doc, jsonString);
 
       int httpResponseCode = http.POST(jsonString);
-      if (httpResponseCode > 0) {
+      String responseBody = http.getString();
+
+      if (httpResponseCode == 201 || httpResponseCode == 200) {
         Serial.println("\n==================================================");
-        Serial.print("📡 ["); Serial.print(deviceId); Serial.println("] Telemetri Terkirim ke Supabase! (HTTP 201)");
+        Serial.print("✅ ["); Serial.print(deviceId); Serial.println("] BERHASIL MASUK DATABASE SUPABASE! (HTTP 201)");
         Serial.print("   ❤️ Detak Jantung : "); Serial.print(finalBPM); Serial.println(" BPM");
         Serial.print("   🫁 SpO2          : "); Serial.print(doc["spo2"].as<int>()); Serial.println(" %");
         Serial.print("   🌡️ Suhu Tubuh    : "); Serial.print(doc["body_temp"].as<float>(), 1); Serial.print(" °C (Sekitar: "); Serial.print(doc["ambient_temp"].as<float>(), 1); Serial.println(" °C)");
@@ -285,10 +287,10 @@ void loop() {
         Serial.println("\n==================================================");
       } else {
         Serial.println("\n==================================================");
-        Serial.print("❌ [Supabase] Gagal Mengirim Telemetri! HTTP Code: ");
+        Serial.print("❌ [Supabase] GAGAL MASUK DATABASE! HTTP Code: ");
         Serial.println(httpResponseCode);
-        Serial.print("   Pesan Error: ");
-        Serial.println(http.errorToString(httpResponseCode).c_str());
+        Serial.print("   Pesan Error Supabase: ");
+        Serial.println(responseBody);
         Serial.println("==================================================");
       }
       http.end();
