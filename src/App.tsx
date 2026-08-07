@@ -203,13 +203,22 @@ function App() {
     setIsHistoryLoading(true);
     const since = new Date();
     since.setDate(since.getDate() - days);
-    const { data } = await supabase
-      .from('telemetry')
-      .select('*')
-      .eq('dog_id', activeDog.id)
+
+    // Find if a collar is assigned to this dog
+    const assignedCollar = Object.entries(collarAssignments).find(([_, dId]) => dId === activeDog.id)?.[0];
+
+    let query = supabase.from('telemetry').select('*');
+    if (assignedCollar) {
+      query = query.or(`dog_id.eq.${activeDog.id},device_id.eq.${assignedCollar}`);
+    } else {
+      query = query.eq('dog_id', activeDog.id);
+    }
+
+    const { data } = await query
       .gte('created_at', since.toISOString())
       .order('created_at', { ascending: false })
       .limit(500);
+
     setHistoryData(data || []);
     setIsHistoryLoading(false);
   };
@@ -234,7 +243,7 @@ function App() {
     if (activeDog?.id) {
       fetchHistory(historyDays);
     }
-  }, [activeDog?.id, historyDays]);
+  }, [activeDog?.id, historyDays, collarAssignments]);
 
   // --- SUPABASE DATA FETCHING & REALTIME ---
   useEffect(() => {
@@ -246,8 +255,6 @@ function App() {
       // Fetch Dogs
       const { data: dogsData } = await supabase.from('dogs').select('*');
       if (dogsData) {
-        // Parse settings which might be stored as JSON if we added it to schema, 
-        // but wait, in SQL we didn't add settings column! We need default settings for now.
         const parsedDogs = dogsData.map(d => ({
           ...d,
           settings: {
@@ -270,17 +277,23 @@ function App() {
     if (!selectedDogId) return;
 
     const fetchInitialTelemetry = async () => {
-      const { data } = await supabase
-        .from('telemetry')
-        .select('*')
-        .eq('dog_id', selectedDogId)
-        .order('timestamp', { ascending: false })
+      const assignedCollar = Object.entries(collarAssignments).find(([_, dId]) => dId === selectedDogId)?.[0];
+
+      let query = supabase.from('telemetry').select('*');
+      if (assignedCollar) {
+        query = query.or(`dog_id.eq.${selectedDogId},device_id.eq.${assignedCollar}`);
+      } else {
+        query = query.eq('dog_id', selectedDogId);
+      }
+
+      const { data } = await query
+        .order('created_at', { ascending: false })
         .limit(30);
 
       if (data && data.length > 0) {
         const formattedData: TelemetryData[] = data.reverse().map(row => ({
-          dogId: row.dog_id,
-          timestamp: row.timestamp,
+          dogId: selectedDogId,
+          timestamp: row.created_at || row.timestamp,
           mpu6050: {
             accelX: row.accel_x || 0,
             accelY: row.accel_y || 0,
@@ -312,7 +325,7 @@ function App() {
     };
 
     fetchInitialTelemetry();
-  }, [selectedDogId]);
+  }, [selectedDogId, collarAssignments]);
 
   // Realtime Subscription for Telemetry
   useEffect(() => {
@@ -325,14 +338,22 @@ function App() {
         {
           event: 'INSERT',
           schema: 'public',
-          table: 'telemetry',
-          filter: `dog_id=eq.${activeDog.id}`
+          table: 'telemetry'
         },
         (payload) => {
           const row = payload.new;
+          
+          const assignedCollar = Object.entries(collarAssignments).find(([_, dId]) => dId === activeDog.id)?.[0];
+          const isTargetDog = 
+            row.dog_id === activeDog.id || 
+            (assignedCollar && row.device_id === assignedCollar) ||
+            (row.device_id && collarAssignments[row.device_id] === activeDog.id);
+
+          if (!isTargetDog) return;
+
           const newTelemetry: TelemetryData = {
-            dogId: row.dog_id,
-            timestamp: row.timestamp,
+            dogId: activeDog.id,
+            timestamp: row.created_at || row.timestamp,
             mpu6050: {
               accelX: row.accel_x || 0,
               accelY: row.accel_y || 0,
@@ -368,6 +389,8 @@ function App() {
               [activeDog.id]: newHist
             };
           });
+
+          setHistoryData(prev => [row, ...prev]);
         }
       )
       .subscribe();
@@ -375,7 +398,7 @@ function App() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [activeDog]);
+  }, [activeDog, collarAssignments]);
 
 
   // Keep selectedDogId valid when switching users or editing dogs

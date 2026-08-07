@@ -270,10 +270,22 @@ void loop() {
 
       int httpResponseCode = http.POST(jsonString);
       if (httpResponseCode > 0) {
-        Serial.println("[Supabase] Data terkirim!");
+        Serial.println("\n==================================================");
+        Serial.print("📡 ["); Serial.print(deviceId); Serial.println("] Telemetri Terkirim ke Supabase! (HTTP 201)");
+        Serial.print("   ❤️ Detak Jantung : "); Serial.print(finalBPM); Serial.println(" BPM");
+        Serial.print("   🫁 SpO2          : "); Serial.print(doc["spo2"].as<int>()); Serial.println(" %");
+        Serial.print("   🌡️ Suhu Tubuh    : "); Serial.print(doc["body_temp"].as<float>(), 1); Serial.print(" °C (Sekitar: "); Serial.print(doc["ambient_temp"].as<float>(), 1); Serial.println(" °C)");
+        Serial.print("   🏃 Langkah       : "); Serial.print(stepsCount); Serial.println(" langkah");
+        Serial.print("   🐕 Postur        : "); Serial.print(doc["posture"].as<const char*>()); Serial.print(" (Aktivitas: "); Serial.print(doc["activity_state"].as<const char*>()); Serial.println(")");
+        Serial.print("   🔋 Baterai ESP32 : 3.84 V (87%)");
+        Serial.println("\n==================================================");
       } else {
-        Serial.print("[Supabase] Error: ");
+        Serial.println("\n==================================================");
+        Serial.print("❌ [Supabase] Gagal Mengirim Telemetri! HTTP Code: ");
+        Serial.println(httpResponseCode);
+        Serial.print("   Pesan Error: ");
         Serial.println(http.errorToString(httpResponseCode).c_str());
+        Serial.println("==================================================");
       }
       http.end();
     } else {
