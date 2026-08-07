@@ -43,8 +43,8 @@ const byte RATE_SIZE = 4;
 byte rates[RATE_SIZE];
 byte rateSpot = 0;
 
-// Batas ambang kontak jari/kulit. 
-const long IR_KONTAK_MINIMUM = 50000;
+// Batas ambang kontak jari/kulit (Diturunkan dari 50000 ke 15000 agar peka & sensitif)
+const long IR_KONTAK_MINIMUM = 15000;
 
 // Rentang BPM valid untuk ANJING (bukan manusia).
 const float BPM_MIN_VALID = 40.0;
@@ -98,10 +98,10 @@ void setup() {
     Serial.println("[-] MAX30102 Gagal! Periksa kabel.");
   } else {
     Serial.println("[+] MAX30102 OK!");
-    byte ledBrightness = 60;
+    byte ledBrightness = 0x7F; // Kecerahan LED IR ditingkatkan ke 127 agar daya tembus ke kulit kuat
     byte sampleAverage = 4;
-    byte ledMode = 2;
-    int sampleRate = 100;
+    byte ledMode = 2;          // 2 = Mode Red + IR
+    int sampleRate = 200;      // Sampling rate 200Hz
     int pulseWidth = 411;
     int adcRange = 4096;
     particleSensor.setup(ledBrightness, sampleAverage, ledMode, sampleRate, pulseWidth, adcRange);
