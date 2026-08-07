@@ -218,12 +218,11 @@ function App() {
 
     let rows = data || [];
     
-    // Ensure telemetry rows belong strictly to activeDog based on online collar assignment
+    // Keep rows if dog_id matches activeDog.id OR if device_id matches assignedCollar
     rows = rows.filter(r => {
-      if (r.device_id && collarAssignments[r.device_id]) {
-        return collarAssignments[r.device_id] === activeDog.id;
-      }
-      return r.dog_id === activeDog.id;
+      if (r.dog_id === activeDog.id) return true;
+      if (assignedCollar && r.device_id === assignedCollar) return true;
+      return false;
     });
 
     // Robust client-side filtering for 1, 3, 7 days
@@ -367,6 +366,9 @@ function App() {
           let targetDogId = row.dog_id;
           if (row.device_id && collarAssignments[row.device_id]) {
             targetDogId = collarAssignments[row.device_id];
+            if (row.id && row.dog_id !== targetDogId) {
+              supabase.from('telemetry').update({ dog_id: targetDogId }).eq('id', row.id).then();
+            }
           }
 
           if (targetDogId !== activeDog.id) return;
@@ -1616,9 +1618,6 @@ function App() {
                             const updated = { ...collarAssignments, [selectedCollarId]: newDogId };
                             setCollarAssignments(updated);
                             localStorage.setItem('dogwatch_collar_map', JSON.stringify(updated));
-                            if (newDogId) {
-                              await supabase.from('telemetry').update({ dog_id: newDogId }).eq('device_id', selectedCollarId);
-                            }
                             if (activeDog?.id) fetchHistory(historyDays);
                           }}
                         >
