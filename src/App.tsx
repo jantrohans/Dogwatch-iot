@@ -426,63 +426,64 @@ function App() {
 
   // --- THRESHOLD CHECKING LOGIC ---
   const checkThresholds = (data: TelemetryData) => {
-    if (!activeDog) return;
-    const settings = activeDog.settings;
+    const targetDog = dogs.find(d => d.id === data.dogId) || activeDog;
+    if (!targetDog) return;
+    const settings = targetDog.settings;
     const newAlerts: Omit<Alert, 'id' | 'timestamp' | 'resolved'>[] = [];
 
     if (data.max30102.heartRate > settings.maxHeartRate) {
       newAlerts.push({
-        dogId: activeDog.id,
-        dogName: activeDog.name,
+        dogId: targetDog.id,
+        dogName: targetDog.name,
         type: 'heart_rate',
         severity: data.max30102.heartRate > settings.maxHeartRate + 25 ? 'critical' : 'warning',
-        message: `${activeDog.name}'s Heart Rate is critically high at ${data.max30102.heartRate} BPM (Limit: ${settings.maxHeartRate} BPM)`
+        message: `${targetDog.name}'s Heart Rate is critically high at ${data.max30102.heartRate} BPM (Limit: ${settings.maxHeartRate} BPM)`
       });
-    } else if (data.max30102.heartRate < settings.minHeartRate) {
+    } else if (data.max30102.heartRate < settings.minHeartRate && data.max30102.heartRate > 0) {
       newAlerts.push({
-        dogId: activeDog.id,
-        dogName: activeDog.name,
+        dogId: targetDog.id,
+        dogName: targetDog.name,
         type: 'heart_rate',
         severity: data.max30102.heartRate < settings.minHeartRate - 15 ? 'critical' : 'warning',
-        message: `${activeDog.name}'s Heart Rate is low at ${data.max30102.heartRate} BPM (Limit: ${settings.minHeartRate} BPM)`
+        message: `${targetDog.name}'s Heart Rate is low at ${data.max30102.heartRate} BPM (Limit: ${settings.minHeartRate} BPM)`
       });
     }
 
-    if (data.max30102.spo2 < settings.minSpO2) {
+    if (data.max30102.spo2 < settings.minSpO2 && data.max30102.spo2 > 0) {
       newAlerts.push({
-        dogId: activeDog.id,
-        dogName: activeDog.name,
+        dogId: targetDog.id,
+        dogName: targetDog.name,
         type: 'spo2',
         severity: data.max30102.spo2 < 90 ? 'critical' : 'warning',
-        message: `${activeDog.name}'s Blood Oxygen level (SpO2) dropped to ${data.max30102.spo2}%! (Normal: >${settings.minSpO2}%)`
+        message: `${targetDog.name}'s Blood Oxygen level (SpO2) dropped to ${data.max30102.spo2}%! (Normal: >${settings.minSpO2}%)`
       });
     }
 
     if (data.mlx90614.bodyTemp > settings.maxTemp) {
       newAlerts.push({
-        dogId: activeDog.id,
-        dogName: activeDog.name,
+        dogId: targetDog.id,
+        dogName: targetDog.name,
         type: 'fever',
         severity: data.mlx90614.bodyTemp > 40.0 ? 'critical' : 'warning',
-        message: `${activeDog.name} has a fever! Body temp is ${data.mlx90614.bodyTemp}°C (${(data.mlx90614.bodyTemp * 1.8 + 32).toFixed(1)}°F)`
+        message: `${targetDog.name} has a fever! Body temp is ${data.mlx90614.bodyTemp}°C (${(data.mlx90614.bodyTemp * 1.8 + 32).toFixed(1)}°F)`
       });
-    } else if (data.mlx90614.bodyTemp < settings.minTemp) {
+    } else if (data.mlx90614.bodyTemp < settings.minTemp && data.mlx90614.bodyTemp > 20.0) {
       newAlerts.push({
-        dogId: activeDog.id,
-        dogName: activeDog.name,
+        dogId: targetDog.id,
+        dogName: targetDog.name,
         type: 'hypothermia',
         severity: data.mlx90614.bodyTemp < 37.0 ? 'critical' : 'warning',
-        message: `${activeDog.name} shows signs of hypothermia. Temp is ${data.mlx90614.bodyTemp}°C (${(data.mlx90614.bodyTemp * 1.8 + 32).toFixed(1)}°F)`
+        message: `${targetDog.name} shows signs of hypothermia. Temp is ${data.mlx90614.bodyTemp}°C (${(data.mlx90614.bodyTemp * 1.8 + 32).toFixed(1)}°F)`
       });
     }
 
     if (data.mlx90614.ambientTemp > 32.0 && data.mlx90614.bodyTemp > 39.2 && data.mpu6050.activityState === 'running') {
       newAlerts.push({
-        dogId: activeDog.id,
-        dogName: activeDog.name,
+        dogId: targetDog.id,
+        dogName: targetDog.name,
         type: 'heatstroke',
         severity: 'critical',
-        message: `HEATSTROKE DANGER: High ambient temp (${data.mlx90614.ambientTemp}°C) coupled with running activity. Seek shade!`
+        message: `HEATSTROKE DANGER for ${targetDog.name}: High ambient temp (${data.mlx90614.ambientTemp}°C) coupled with running activity. Seek shade!`
       });
     }
 
@@ -493,11 +494,11 @@ function App() {
     );
     if (accelMagnitude > 3.0) {
       newAlerts.push({
-        dogId: activeDog.id,
-        dogName: activeDog.name,
+        dogId: targetDog.id,
+        dogName: targetDog.name,
         type: 'fall',
         severity: 'critical',
-        message: `CRITICAL ALERT: Sudden high impact (fall/collision) detected for ${activeDog.name}!`
+        message: `CRITICAL ALERT: Sudden high impact (fall/collision) detected for ${targetDog.name}!`
       });
     }
 
@@ -834,13 +835,21 @@ function App() {
     return `${celsius.toFixed(1)}°C`;
   };
 
-  // Filter active alerts for visible dogs
-  const visibleDogIds = userDogs.map(d => d.id);
-  const activeAlerts = alerts.filter(a => visibleDogIds.includes(a.dogId) && !a.resolved);
+  // Filter active alerts for the currently active dog (so Soba only shows Soba's alerts, Melody shows Melody's)
+  const activeAlerts = alerts.filter(a => a.dogId === activeDog?.id && !a.resolved);
 
   const formatTime = (isoString: string) => {
+    if (!isoString) return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     const date = new Date(isoString);
+    if (isNaN(date.getTime())) return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+
+  const formatTableRowDate = (rawDate: any) => {
+    if (!rawDate) return new Date().toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const date = new Date(rawDate);
+    if (isNaN(date.getTime())) return new Date().toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    return date.toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
   };
 
   // --- RENDERING AUTH VIEW ---
@@ -1575,17 +1584,22 @@ function App() {
                           className="sim-select" 
                           style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', flex: 1 }}
                           value={collarAssignments[selectedCollarId] || ''}
-                          onChange={(e) => {
+                          onChange={async (e) => {
+                            const newDogId = e.target.value;
                             const dogAlreadyAssigned = Object.entries(collarAssignments).find(
-                              ([cId, dId]) => dId === e.target.value && cId !== selectedCollarId && e.target.value !== ''
+                              ([cId, dId]) => dId === newDogId && cId !== selectedCollarId && newDogId !== ''
                             );
                             if (dogAlreadyAssigned) {
                               alert(`⚠️ Anjing ini sudah ditugaskan ke ${dogAlreadyAssigned[0]}! Lepaskan dulu dari kalung tersebut.`);
                               return;
                             }
-                            const updated = { ...collarAssignments, [selectedCollarId]: e.target.value };
+                            const updated = { ...collarAssignments, [selectedCollarId]: newDogId };
                             setCollarAssignments(updated);
                             localStorage.setItem('dogwatch_collar_map', JSON.stringify(updated));
+                            if (newDogId) {
+                              await supabase.from('telemetry').update({ dog_id: newDogId }).eq('device_id', selectedCollarId);
+                            }
+                            if (activeDog?.id) fetchHistory(historyDays);
                           }}
                         >
                           <option value="">— Belum Ditugaskan —</option>
@@ -1599,6 +1613,7 @@ function App() {
                               const updated = { ...collarAssignments, [selectedCollarId]: '' };
                               setCollarAssignments(updated);
                               localStorage.setItem('dogwatch_collar_map', JSON.stringify(updated));
+                              if (activeDog?.id) fetchHistory(historyDays);
                             }}
                             style={{ padding: '0.2rem 0.45rem', fontSize: '0.7rem', fontWeight: 600, background: 'rgba(220, 38, 38, 0.12)', color: 'var(--color-critical)', border: '1px solid rgba(220, 38, 38, 0.25)', borderRadius: '5px', cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 0.2s' }}
                             title={`Lepas kalung ${selectedCollarId}`}
@@ -1623,6 +1638,7 @@ function App() {
                                     const updated = { ...collarAssignments, [cId]: '' };
                                     setCollarAssignments(updated);
                                     localStorage.setItem('dogwatch_collar_map', JSON.stringify(updated));
+                                    if (activeDog?.id) fetchHistory(historyDays);
                                   }}
                                   style={{ padding: '0.1rem 0.3rem', fontSize: '0.65rem', background: 'rgba(220,38,38,0.1)', color: 'var(--color-critical)', border: '1px solid rgba(220,38,38,0.2)', borderRadius: '4px', cursor: 'pointer', lineHeight: 1 }}
                                   title={`Lepas ${assignedDog.name} dari ${cId}`}
@@ -1686,7 +1702,7 @@ function App() {
                     <tbody>
                       {historyData.map((row: any, i: number) => (
                         <tr key={i}>
-                          <td>{new Date(row.created_at).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+                          <td>{formatTableRowDate(row.created_at || row.timestamp)}</td>
                           <td style={{ color: row.heart_rate > 140 || row.heart_rate < 60 ? 'var(--color-critical)' : 'var(--text-primary)' }}>{row.heart_rate || '-'}</td>
                           <td>{row.spo2 || '-'}%</td>
                           <td style={{ color: row.body_temp > 39.5 ? 'var(--color-critical)' : row.body_temp > 39.0 ? 'var(--color-warning)' : 'var(--text-primary)' }}>{row.body_temp?.toFixed(1) || '-'}°C</td>
