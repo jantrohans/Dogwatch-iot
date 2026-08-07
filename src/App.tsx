@@ -178,6 +178,11 @@ function App() {
   const [activeTab, setActiveTab] = useState<'realtime' | 'mpu6050' | 'max30102' | 'mlx90614'>('realtime');
   const [chartViewMode, setChartViewMode] = useState<'area' | 'bar'>('area');
   const [barSampleCount, setBarSampleCount] = useState<number>(8);
+  const [selectedCollarId, setSelectedCollarId] = useState<string>('COLLAR-01');
+  const [collarAssignments, setCollarAssignments] = useState<Record<string, string>>(() => {
+    const stored = localStorage.getItem('dogwatch_collar_map');
+    return stored ? JSON.parse(stored) : { 'COLLAR-01': '', 'COLLAR-02': '', 'COLLAR-03': '' };
+  });
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const stored = localStorage.getItem('dogwatch_theme');
     return stored ? stored === 'dark' : true;
@@ -826,7 +831,7 @@ function App() {
           </div>
 
           <h2 className="auth-title">Portal Akses Dashboard</h2>
-          <p className="auth-subtitle">Pilih jenis akun untuk masuk ke sistem monitoring Smartwatch Anjing</p>
+          <p className="auth-subtitle">Pilih jenis akun untuk masuk ke sistem monitoring Smartcollar Anjing</p>
 
           {authStep === 'select' ? (
             <div className="role-selection-cards" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '2rem' }}>
@@ -1294,12 +1299,12 @@ function App() {
               </section>
             ) : (
               <div className="glass-card" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-                Menunggu paket telemetri dari Smartwatch ESP32...
+                Menunggu paket telemetri dari Smartcollar ESP32...
               </div>
             )}
 
             {/* CHARTS SECTION */}
-            <section className="dashboard-mid">
+            <section className="dashboard-mid" style={!isAdmin ? { gridTemplateColumns: '1fr' } : undefined}>
               
               {/* HISTORICAL CHARTS CARD */}
               <div className="glass-card chart-card">
@@ -1314,56 +1319,30 @@ function App() {
                         onClick={() => setChartViewMode('area')}
                         title="Tampilan Tren Grafik Area (Dengan Tab)"
                       >
-                        <TrendingUp size={13} />
+                        <TrendingUp size={14} />
                         <span>Tren (Area)</span>
                       </button>
                       <button 
                         className={`chart-mode-btn ${chartViewMode === 'bar' ? 'active' : ''}`}
                         onClick={() => setChartViewMode('bar')}
-                        title="Tampilan Grafik Balok (Semua Sensor Sekaligus)"
+                        title="Tampilan Semua Hasil Sensor sekaligus (Grafik Balok)"
                       >
-                        <BarChart2 size={13} />
+                        <BarChart2 size={14} />
                         <span>Semua Sensor (Balok)</span>
                       </button>
                     </div>
                   </div>
 
-                  {chartViewMode === 'area' ? (
-                    <div className="chart-controls">
-                      <button 
-                        className={`chart-tab-btn ${activeTab === 'realtime' ? 'active' : ''}`}
-                        onClick={() => setActiveTab('realtime')}
-                      >
-                        Metrik Utama
-                      </button>
-                      <button 
-                        className={`chart-tab-btn ${activeTab === 'mpu6050' ? 'active' : ''}`}
-                        onClick={() => setActiveTab('mpu6050')}
-                      >
-                        MPU6050 (Gerak)
-                      </button>
-                      <button 
-                        className={`chart-tab-btn ${activeTab === 'max30102' ? 'active' : ''}`}
-                        onClick={() => setActiveTab('max30102')}
-                      >
-                        MAX30102 (Pulsa)
-                      </button>
-                      <button 
-                        className={`chart-tab-btn ${activeTab === 'mlx90614' ? 'active' : ''}`}
-                        onClick={() => setActiveTab('mlx90614')}
-                      >
-                        MLX90614 (Suhu)
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="chart-mode-badge" style={{ gap: '0.4rem', display: 'flex', alignItems: 'center' }}>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Tampilkan:</span>
+                  {/* Sample count selector for Bar mode */}
+                  {chartViewMode === 'bar' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginLeft: 'auto' }}>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Sampel:</span>
                       {[8, 12, 20].map(cnt => (
                         <button
                           key={cnt}
-                          className={`chart-tab-btn ${barSampleCount === cnt ? 'active' : ''}`}
                           onClick={() => setBarSampleCount(cnt)}
-                          style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                          className={`history-filter-btn ${barSampleCount === cnt ? 'active' : ''}`}
+                          style={{ padding: '0.15rem 0.45rem', fontSize: '0.7rem' }}
                         >
                           {cnt} Data
                         </button>
@@ -1372,36 +1351,73 @@ function App() {
                   )}
                 </div>
 
-                <div className="chart-wrapper">
-                  <ResponsiveContainer width="100%" height="100%">
+                {chartViewMode === 'area' && (
+                  <div className="chart-tabs">
+                    <button 
+                      className={`chart-tab ${activeTab === 'realtime' ? 'active' : ''}`} 
+                      onClick={() => setActiveTab('realtime')}
+                    >
+                      Metrik Utama
+                    </button>
+                    <button 
+                      className={`chart-tab ${activeTab === 'mpu6050' ? 'active' : ''}`} 
+                      onClick={() => setActiveTab('mpu6050')}
+                    >
+                      MPU6050 (Gerak)
+                    </button>
+                    <button 
+                      className={`chart-tab ${activeTab === 'max30102' ? 'active' : ''}`} 
+                      onClick={() => setActiveTab('max30102')}
+                    >
+                      MAX30102 (Pulsa)
+                    </button>
+                    <button 
+                      className={`chart-tab ${activeTab === 'mlx90614' ? 'active' : ''}`} 
+                      onClick={() => setActiveTab('mlx90614')}
+                    >
+                      MLX90614 (Suhu)
+                    </button>
+                  </div>
+                )}
+
+                <div className="chart-area" style={{ minHeight: '260px' }}>
+                  <ResponsiveContainer width="100%" height={260}>
                     {chartViewMode === 'bar' ? (
-                      /* GRAFIK BALOK TEBAL (ALL SENSORS AT ONCE) */
+                      /* BAR CHART VIEW */
                       <BarChart 
                         data={activeHistory.slice(-barSampleCount).map(h => ({
                           time: formatTime(h.timestamp),
-                          "Heart Rate (BPM)": h.max30102.heartRate,
-                          "SpO2 (%)": h.max30102.spo2,
-                          [`Suhu Tubuh (°${tempUnit})`]: tempUnit === 'F' ? parseFloat((h.mlx90614.bodyTemp * 1.8 + 32).toFixed(1)) : h.mlx90614.bodyTemp,
-                          "HRV (ms)": h.max30102.hrv
+                          'Detak Jantung': h.max30102.heartRate,
+                          'SpO2': h.max30102.spo2,
+                          'Suhu Tubuh': tempUnit === 'F' ? parseFloat((h.mlx90614.bodyTemp * 1.8 + 32).toFixed(1)) : h.mlx90614.bodyTemp,
+                          'Langkah': h.mpu6050.steps
                         }))}
-                        barGap={3}
-                        barCategoryGap="18%"
+                        barGap={4}
+                        margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
                       >
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                        <XAxis dataKey="time" stroke="var(--text-muted)" fontSize={10} />
-                        <YAxis stroke="var(--text-muted)" fontSize={10} />
-                        <Tooltip contentStyle={{ background: '#141A26', borderColor: 'rgba(255,255,255,0.1)', color: '#fff', borderRadius: '8px' }} />
-                        <Legend wrapperStyle={{ paddingTop: '8px', fontSize: '11px' }} />
-                        <Bar dataKey="Heart Rate (BPM)" fill="var(--color-critical)" radius={[4, 4, 0, 0]} maxBarSize={22} />
-                        <Bar dataKey="SpO2 (%)" fill="var(--accent-cyan)" radius={[4, 4, 0, 0]} maxBarSize={22} />
-                        <Bar dataKey={`Suhu Tubuh (°${tempUnit})`} fill="var(--color-warning)" radius={[4, 4, 0, 0]} maxBarSize={22} />
-                        <Bar dataKey="HRV (ms)" fill="var(--accent-purple)" radius={[4, 4, 0, 0]} maxBarSize={22} />
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                        <XAxis dataKey="time" stroke="var(--text-muted)" fontSize={11} tickLine={false} />
+                        <YAxis stroke="var(--text-muted)" fontSize={11} tickLine={false} />
+                        <Tooltip 
+                          contentStyle={{ 
+                            background: 'rgba(20, 26, 38, 0.95)', 
+                            backdropFilter: 'blur(8px)',
+                            borderColor: 'rgba(255,255,255,0.15)', 
+                            borderRadius: '8px',
+                            color: '#fff',
+                            boxShadow: '0 8px 32px rgba(0,0,0,0.4)'
+                          }} 
+                        />
+                        <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                        <Bar dataKey="Detak Jantung" fill="#FF5252" radius={[4, 4, 0, 0]} maxBarSize={22} />
+                        <Bar dataKey="SpO2" fill="#00F2FE" radius={[4, 4, 0, 0]} maxBarSize={22} />
+                        <Bar dataKey="Suhu Tubuh" fill="#F59E0B" radius={[4, 4, 0, 0]} maxBarSize={22} />
+                        <Bar dataKey="Langkah" fill="#FF7E5F" radius={[4, 4, 0, 0]} maxBarSize={22} />
                       </BarChart>
                     ) : activeTab === 'realtime' ? (
                       <AreaChart data={activeHistory.map(h => ({
                         time: formatTime(h.timestamp),
                         heartRate: h.max30102.heartRate,
-                        spo2: h.max30102.spo2,
                         bodyTemp: tempUnit === 'F' ? parseFloat((h.mlx90614.bodyTemp * 1.8 + 32).toFixed(1)) : h.mlx90614.bodyTemp
                       }))}>
                         <defs>
@@ -1415,18 +1431,15 @@ function App() {
                         <YAxis stroke="var(--text-muted)" fontSize={10} />
                         <Tooltip contentStyle={{ background: '#141A26', borderColor: 'rgba(255,255,255,0.1)', color: '#fff' }} />
                         <Area type="monotone" dataKey="heartRate" name="Heart Rate (BPM)" stroke="var(--color-critical)" fillOpacity={1} fill="url(#colorHR)" strokeWidth={2} />
-                        <Area type="monotone" dataKey="bodyTemp" name={`Body Temp (°${tempUnit})`} stroke="var(--color-warning)" fill="none" strokeWidth={2} />
+                        <Area type="monotone" dataKey="bodyTemp" name={`Suhu (°${tempUnit})`} stroke="var(--color-warning)" fill="none" strokeWidth={2} />
                       </AreaChart>
                     ) : activeTab === 'mpu6050' ? (
                       <AreaChart data={activeHistory.map(h => ({
                         time: formatTime(h.timestamp),
-                        accelX: h.mpu6050.accelX,
-                        accelY: h.mpu6050.accelY,
-                        accelZ: h.mpu6050.accelZ,
                         steps: h.mpu6050.steps
                       }))}>
                         <defs>
-                          <linearGradient id="colorAccel" x1="0" y1="0" x2="0" y2="1">
+                          <linearGradient id="colorSteps" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="5%" stopColor="var(--accent-orange)" stopOpacity={0.4}/>
                             <stop offset="95%" stopColor="var(--accent-orange)" stopOpacity={0}/>
                           </linearGradient>
@@ -1435,29 +1448,26 @@ function App() {
                         <XAxis dataKey="time" stroke="var(--text-muted)" fontSize={10} />
                         <YAxis stroke="var(--text-muted)" fontSize={10} />
                         <Tooltip contentStyle={{ background: '#141A26', borderColor: 'rgba(255,255,255,0.1)', color: '#fff' }} />
-                        <Area type="monotone" dataKey="accelZ" name="Accel Z (G)" stroke="var(--accent-orange)" fillOpacity={1} fill="url(#colorAccel)" strokeWidth={2} />
-                        <Area type="monotone" dataKey="accelX" name="Accel X (G)" stroke="var(--accent-purple)" fill="none" strokeWidth={1} />
-                        <Area type="monotone" dataKey="accelY" name="Accel Y (G)" stroke="var(--accent-teal)" fill="none" strokeWidth={1} />
+                        <Area type="monotone" dataKey="steps" name="Kumulatif Langkah" stroke="var(--accent-orange)" fillOpacity={1} fill="url(#colorSteps)" strokeWidth={2} />
                       </AreaChart>
                     ) : activeTab === 'max30102' ? (
                       <AreaChart data={activeHistory.map(h => ({
                         time: formatTime(h.timestamp),
                         heartRate: h.max30102.heartRate,
-                        spo2: h.max30102.spo2,
-                        hrv: h.max30102.hrv
+                        spo2: h.max30102.spo2
                       }))}>
                         <defs>
-                          <linearGradient id="colorHRV" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="var(--accent-purple)" stopOpacity={0.4}/>
-                            <stop offset="95%" stopColor="var(--accent-purple)" stopOpacity={0}/>
+                          <linearGradient id="colorSpO2" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="var(--accent-cyan)" stopOpacity={0.4}/>
+                            <stop offset="95%" stopColor="var(--accent-cyan)" stopOpacity={0}/>
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                         <XAxis dataKey="time" stroke="var(--text-muted)" fontSize={10} />
                         <YAxis stroke="var(--text-muted)" fontSize={10} />
                         <Tooltip contentStyle={{ background: '#141A26', borderColor: 'rgba(255,255,255,0.1)', color: '#fff' }} />
-                        <Area type="monotone" dataKey="spo2" name="SpO2 (%)" stroke="var(--accent-cyan)" fill="none" strokeWidth={2} />
-                        <Area type="monotone" dataKey="hrv" name="HRV (ms)" stroke="var(--accent-purple)" fillOpacity={1} fill="url(#colorHRV)" strokeWidth={2} />
+                        <Area type="monotone" dataKey="spo2" name="SpO2 (%)" stroke="var(--accent-cyan)" fillOpacity={1} fill="url(#colorSpO2)" strokeWidth={2} />
+                        <Area type="monotone" dataKey="heartRate" name="Heart Rate (BPM)" stroke="var(--color-critical)" fill="none" strokeWidth={2} />
                       </AreaChart>
                     ) : (
                       <AreaChart data={activeHistory.map(h => ({
@@ -1483,50 +1493,132 @@ function App() {
                 </div>
               </div>
 
-              {/* HARDWARE OVERVIEW / SENSORS SUMMARY */}
-              <div className="glass-card chart-card" style={{ gap: '0.75rem' }}>
-                <span className="chart-title">Status Perangkat Smartwatch</span>
-                
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', height: '100%', justifyContent: 'center' }}>
+              {/* HARDWARE OVERVIEW / SENSORS SUMMARY (ONLY VISIBLE FOR ADMIN) */}
+              {isAdmin && (
+                <div className="glass-card chart-card" style={{ gap: '0.75rem' }}>
+                  <span className="chart-title">Status Perangkat Smartcollar</span>
                   
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <Activity size={16} style={{ color: 'var(--accent-orange)' }} />
-                      <span style={{ fontSize: '0.85rem' }}>MPU6050 (Gerak/Aktivitas)</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', height: '100%', justifyContent: 'center' }}>
+                    
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Activity size={16} style={{ color: 'var(--accent-orange)' }} />
+                        <span style={{ fontSize: '0.85rem' }}>MPU6050 (Gerak/Aktivitas)</span>
+                      </div>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--color-success)', fontWeight: '600' }}>ONLINE</span>
                     </div>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--color-success)', fontWeight: '600' }}>ONLINE</span>
-                  </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <Heart size={16} style={{ color: 'var(--color-critical)' }} />
-                      <span style={{ fontSize: '0.85rem' }}>MAX30102 (Pulsa/SpO2)</span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Heart size={16} style={{ color: 'var(--color-critical)' }} />
+                        <span style={{ fontSize: '0.85rem' }}>MAX30102 (Pulsa/SpO2)</span>
+                      </div>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--color-success)', fontWeight: '600' }}>ONLINE</span>
                     </div>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--color-success)', fontWeight: '600' }}>ONLINE</span>
-                  </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <Thermometer size={16} style={{ color: 'var(--color-warning)' }} />
-                      <span style={{ fontSize: '0.85rem' }}>MLX90614 (Suhu IR)</span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Thermometer size={16} style={{ color: 'var(--color-warning)' }} />
+                        <span style={{ fontSize: '0.85rem' }}>MLX90614 (Suhu IR)</span>
+                      </div>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--color-success)', fontWeight: '600' }}>ONLINE</span>
                     </div>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--color-success)', fontWeight: '600' }}>ONLINE</span>
-                  </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <Zap size={16} style={{ color: 'var(--accent-cyan)' }} />
-                      <span style={{ fontSize: '0.85rem' }}>Baterai ESP32 Collar</span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Zap size={16} style={{ color: 'var(--accent-cyan)' }} />
+                        <span style={{ fontSize: '0.85rem' }}>Baterai ESP32 Collar</span>
+                      </div>
+                      <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--accent-cyan)' }}>3.84 V (87%)</span>
                     </div>
-                    <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--accent-cyan)' }}>3.84 V (87%)</span>
-                  </div>
 
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.25rem', marginTop: '0.5rem' }}>
-                    <Info size={12} />
-                    <span>ESP32 siap menerima / mengirim telemetri via MQTT.</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginTop: '0.25rem', padding: '0.65rem', background: 'rgba(0, 242, 254, 0.05)', borderRadius: '8px', border: '1px solid rgba(0, 242, 254, 0.15)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--accent-cyan)' }}>📡 Penugasan Kalung IoT (Online):</span>
+                        <select 
+                          className="sim-select" 
+                          style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-cyan)', background: 'rgba(0,242,254,0.1)', border: '1px solid rgba(0,242,254,0.2)', borderRadius: '4px', cursor: 'pointer', outline: 'none' }}
+                          value={selectedCollarId}
+                          onChange={(e) => setSelectedCollarId(e.target.value)}
+                        >
+                          <option value="COLLAR-01" style={{ background: '#141A26', color: '#fff' }}>COLLAR-01</option>
+                          <option value="COLLAR-02" style={{ background: '#141A26', color: '#fff' }}>COLLAR-02</option>
+                          <option value="COLLAR-03" style={{ background: '#141A26', color: '#fff' }}>COLLAR-03</option>
+                        </select>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Dipasang ke:</span>
+                        <select 
+                          className="sim-select" 
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', flex: 1 }}
+                          value={collarAssignments[selectedCollarId] || ''}
+                          onChange={(e) => {
+                            const dogAlreadyAssigned = Object.entries(collarAssignments).find(
+                              ([cId, dId]) => dId === e.target.value && cId !== selectedCollarId && e.target.value !== ''
+                            );
+                            if (dogAlreadyAssigned) {
+                              alert(`⚠️ Anjing ini sudah ditugaskan ke ${dogAlreadyAssigned[0]}! Lepaskan dulu dari kalung tersebut.`);
+                              return;
+                            }
+                            const updated = { ...collarAssignments, [selectedCollarId]: e.target.value };
+                            setCollarAssignments(updated);
+                            localStorage.setItem('dogwatch_collar_map', JSON.stringify(updated));
+                          }}
+                        >
+                          <option value="">— Belum Ditugaskan —</option>
+                          {dogs.map(d => (
+                            <option key={d.id} value={d.id}>{d.name} ({d.breed})</option>
+                          ))}
+                        </select>
+                        {collarAssignments[selectedCollarId] && (
+                          <button
+                            onClick={() => {
+                              const updated = { ...collarAssignments, [selectedCollarId]: '' };
+                              setCollarAssignments(updated);
+                              localStorage.setItem('dogwatch_collar_map', JSON.stringify(updated));
+                            }}
+                            style={{ padding: '0.2rem 0.45rem', fontSize: '0.7rem', fontWeight: 600, background: 'rgba(220, 38, 38, 0.12)', color: 'var(--color-critical)', border: '1px solid rgba(220, 38, 38, 0.25)', borderRadius: '5px', cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 0.2s' }}
+                            title={`Lepas kalung ${selectedCollarId}`}
+                          >
+                            ✕ Lepas
+                          </button>
+                        )}
+                      </div>
+                      {/* Status ringkasan semua kalung */}
+                      <div style={{ marginTop: '0.35rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                        {['COLLAR-01', 'COLLAR-02', 'COLLAR-03'].map(cId => {
+                          const assignedDog = dogs.find(d => d.id === collarAssignments[cId]);
+                          return (
+                            <div key={cId} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.7rem', color: cId === selectedCollarId ? 'var(--accent-cyan)' : 'var(--text-muted)' }}>
+                              <span style={{ fontWeight: 700, minWidth: '72px' }}>{cId}:</span>
+                              <span style={{ fontWeight: assignedDog ? 600 : 400, color: assignedDog ? 'var(--color-success)' : 'var(--text-muted)', flex: 1 }}>
+                                {assignedDog ? `✅ ${assignedDog.name}` : '— Kosong'}
+                              </span>
+                              {assignedDog && (
+                                <button
+                                  onClick={() => {
+                                    const updated = { ...collarAssignments, [cId]: '' };
+                                    setCollarAssignments(updated);
+                                    localStorage.setItem('dogwatch_collar_map', JSON.stringify(updated));
+                                  }}
+                                  style={{ padding: '0.1rem 0.3rem', fontSize: '0.65rem', background: 'rgba(220,38,38,0.1)', color: 'var(--color-critical)', border: '1px solid rgba(220,38,38,0.2)', borderRadius: '4px', cursor: 'pointer', lineHeight: 1 }}
+                                  title={`Lepas ${assignedDog.name} dari ${cId}`}
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                        <Info size={12} />
+                        <span>Setiap kalung dipetakan ke 1 anjing. Tidak boleh duplikat.</span>
+                      </span>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </section>
 
             {/* HEALTH HISTORY TABLE */}

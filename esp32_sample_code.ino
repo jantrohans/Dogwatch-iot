@@ -21,11 +21,14 @@ const char* password_2 = "PASSWORD_CADANGAN_1";
 const char* ssid_3 = "WIFI_CADANGAN_2";           // Ganti dengan WiFi Cadangan 2
 const char* password_3 = "PASSWORD_CADANGAN_2";
 
-const char* supabaseUrl = "https://uvkqbzwonjqiigfvwobx.supabase.co/rest/v1/telemetry";
-const char* supabaseApiKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV2a3FiendvbmpxaWlnZnZ3b2J4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2MTExNjUsImV4cCI6MjEwMDE4NzE2NX0.3z1wGD61RgEsSeLJRixAHP1taCh4PM96G5nL-QjSPlY";
+// ================= ID PERANGKAT KALUNG (ONLINE CONFIG) =================
+// ID Perangkat Kalung bersifat PERMANEN pada chip ESP32 ini.
+// Anda TIDAK PERLU lagi mengubah kodingan Arduino jika kalung dipindahkan ke anjing lain!
+// Cukup ganti penugasan anjing di Web Dashboard Admin secara ONLINE.
+const char* deviceId = "COLLAR-01"; 
 
-// ID Anjing dari dashboard admin
-const char* dogId = "GANTI_DENGAN_ID_ANJING_DARI_DASHBOARD"; 
+// ID Anjing default (fallback jika belum diset di dashboard)
+const char* dogId = "dog-melody-1784628050889"; 
 
 // ================= INSTANSI SENSOR & VARIABEL =================
 Adafruit_MPU6050 mpu;
@@ -236,6 +239,7 @@ void loop() {
       http.addHeader("Authorization", String("Bearer ") + supabaseApiKey);
 
       StaticJsonDocument<500> doc;
+      doc["device_id"] = deviceId;
       doc["dog_id"] = dogId;
       doc["accel_x"] = a.acceleration.x;
       doc["accel_y"] = a.acceleration.y;
